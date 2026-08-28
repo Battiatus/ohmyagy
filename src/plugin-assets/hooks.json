@@ -1,0 +1,17 @@
+{
+  "oma-strict-write-gate": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"__OMA_STRICT_HOOK__\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

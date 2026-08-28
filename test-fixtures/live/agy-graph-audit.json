@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-28T14:07:53Z",
+  "agyVersion": "1.1.22",
+  "model": "gemini-3.7-flash-low",
+  "conversationId": "97841514-8df2-4a86-a441-c46e93eee29e",
+  "workspaceRoot": "C:\\Users\\User\\Documents\\Repos\\plugins\\ohmyagy",
+  "noDangerousPermissionBypass": true,
+  "transcriptPath": "C:\\Users\\User\\.gemini\\antigravity-cli\\brain\\97841514-8df2-4a86-a441-c46e93eee29e\\.system_generated\\logs\\transcript_full.jsonl",
+  "transcriptSha256": "569ad72fcd1944b36ee794f2d83c74def09a980a70104d5538c8aae0425fa9b9",
+  "conversationDbPath": "C:\\Users\\User\\.gemini\\antigravity-cli\\conversations\\97841514-8df2-4a86-a441-c46e93eee29e.db",
+  "conversationDbSha256": "046d641f74d533e4851b364948e225eb971ef03661c46d50902d5708a1eb1369",
+  "conversationWalPath": "C:\\Users\\User\\.gemini\\antigravity-cli\\conversations\\97841514-8df2-4a86-a441-c46e93eee29e.db-wal",
+  "conversationWalSha256": "e6a4bafbb22ca32b10567abdf1ac7a4648368f48a60f5aa2f29512405c8d1044",
+  "graphDefinitionSha256": "299b9f9cf025b7497ba83a078d762ac978bd95a12aec413dd5550c859cb32fde",
+  "restoredTelemetryPluginPath": "C:\\Users\\User\\.gemini\\config\\plugins\\googlecloudtools.datacloud_telemetry",
+  "temporaryTelemetryPluginPath": "C:\\Users\\User\\.gemini\\config\\.oma-live-disabled-googlecloudtools.datacloud_telemetry"
+}

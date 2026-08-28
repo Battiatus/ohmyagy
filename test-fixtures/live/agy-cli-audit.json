@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-28T13:19:34Z",
+  "agyVersion": "1.1.22",
+  "model": "gemini-3.7-flash-low",
+  "conversationId": "39e10853-2843-4bdc-b3a3-8e0115321457",
+  "workspaceRoot": "C:\\Users\\User\\Documents\\Repos\\plugins\\ohmyagy",
+  "noDangerousPermissionBypass": true,
+  "transcriptPath": "C:\\Users\\User\\.gemini\\antigravity-cli\\brain\\39e10853-2843-4bdc-b3a3-8e0115321457\\.system_generated\\logs\\transcript_full.jsonl",
+  "transcriptSha256": "6644f20f6ccd37e54fb2d6989eacf7ae193c7b3b34f8282a6aa9d82510a37ef6",
+  "conversationDbPath": "C:\\Users\\User\\.gemini\\antigravity-cli\\conversations\\39e10853-2843-4bdc-b3a3-8e0115321457.db",
+  "conversationDbSha256": "f9732b70335c0138717158b742edef83319535394839a11136f7b45a0dd3b44e",
+  "restoredTelemetryPluginPath": "C:\\Users\\User\\.gemini\\config\\plugins\\googlecloudtools.datacloud_telemetry",
+  "temporaryTelemetryPluginPath": "C:\\Users\\User\\.gemini\\config\\.oma-live-disabled-googlecloudtools.datacloud_telemetry"
+}

@@ -1,0 +1,34 @@
+{
+  "name": "oh-my-antigravity",
+  "version": "1.0.0",
+  "description": "CLI project",
+  "main": "dist/src/index.js",
+  "type": "module",
+  "bin": {
+    "oma": "./dist/bin/oma.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/bin/oma.js",
+    "test": "npm run test:all",
+    "test:all": "npm run build && node --test --test-concurrency=1 dist/src/graph/__tests__/graph.test.js dist/src/control/__tests__/control.test.js dist/src/strict/__tests__/policy.test.js dist/src/broker/__tests__/cas.test.js dist/src/broker/__tests__/staging.test.js dist/src/oracle/__tests__/oracle.test.js dist/src/broker/__tests__/promotion.test.js dist/src/ledger/__tests__/authority.test.js dist/src/resume/__tests__/resume.test.js dist/src/mcp/__tests__/broker-server.test.js",
+    "test:graph": "npm run build && node --test dist/src/graph/__tests__/graph.test.js",
+    "test:control": "npm run build && node --test dist/src/control/__tests__/control.test.js",
+    "test:strict": "npm run build && node --test dist/src/strict/__tests__/policy.test.js",
+    "test:broker:cas": "npm run build && node --test dist/src/broker/__tests__/cas.test.js",
+    "test:broker:staging": "npm run build && node --test dist/src/broker/__tests__/staging.test.js",
+    "test:oracle": "npm run build && node --test dist/src/oracle/__tests__/oracle.test.js",
+    "test:broker:promotion": "npm run build && node --test dist/src/broker/__tests__/promotion.test.js",
+    "test:ledger": "npm run build && node --test dist/src/ledger/__tests__/authority.test.js",
+    "test:resume": "npm run build && node --test dist/src/resume/__tests__/resume.test.js",
+    "test:plugin": "npm run build && node --test dist/src/mcp/__tests__/broker-server.test.js",
+    "test:live": "npm run build && node --test dist/src/live/__tests__/live-audit.test.js",
+    "control:verify": "npm run build && node dist/bin/oma.js control verify"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^7.0.2"
+  }
+}

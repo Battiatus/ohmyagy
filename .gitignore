@@ -1,0 +1,7 @@
+.oma/*
+.omc/*
+
+.omo/*
+node/
+node_modules
+.agents
