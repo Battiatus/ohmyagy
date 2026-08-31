@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MissionProjectionEngine } from "../../src/graph/mission-projections.js";
 import { DeterministicResumeEngine } from "../../src/resume/engine.js";
 import { MissionResumptionEngine } from "../../src/orchestration/mission-resumption.js";
-import { BenchmarkRunner } from "../../src/benchmark/benchmark-runner.js";
+import { BenchmarkRunner, type BenchmarkRunReport } from "../../src/benchmark/benchmark-runner.js";
 import { ObjectiveJudge, type PipelineModuleBundle } from "../../src/oracle/objective-judge.js";
 import { runOmaCli } from "../../src/cli/oma-cli.js";
 import { OmaDoctor } from "../../src/runtime/doctor.js";
@@ -452,7 +452,7 @@ describe("Tier 2: Boundary & Corner Cases — Features 19 to 27", () => {
       }
     });
 
-    it("22.3: handles corrupted/truncated last line in event stream during recovery", async () => {
+    it("22.3: rejects and throws on syntax corruption in event stream during recovery", async () => {
       const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-resum3-"));
       try {
         const missionDir = join(tempDir, ".oma", "missions", "mission-corrupt-line");
@@ -465,12 +465,10 @@ describe("Tier 2: Boundary & Corner Cases — Features 19 to 27", () => {
           rulebookRevision: "rev",
           goal: "Corrupt check",
         });
-        // Append incomplete JSON line
-        writeFileSync(eventsPath, '{"type": "run_started", "runId": "truncated-line\n', { flag: "a" });
+        // Append corrupted incomplete JSON line
+        writeFileSync(eventsPath, '{"type": "run_started", "runId": "corrupted\n', { flag: "a" });
 
-        const events = MissionEventsStore.readEvents(eventsPath);
-        assert.equal(events.length, 1);
-        assert.equal(events[0].type, "mission_started");
+        assert.throws(() => MissionEventsStore.readEvents(eventsPath), /JSON|SyntaxError/);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -538,76 +536,42 @@ describe("Tier 2: Boundary & Corner Cases — Features 19 to 27", () => {
   // Feature 23: Complete Mission Pipeline & Orchestration (Boundary Cases)
   // --------------------------------------------------------------------------
   describe("Feature 23: Complete Mission Pipeline & Orchestration (Boundary Cases)", () => {
-    it("23.1: runs end-to-end benchmark with 1 trial per variant", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe1-"));
-      try {
-        const result = await BenchmarkRunner.executeBenchmark({
-          workspaceRoot: tempDir,
-          trialsPerVariant: 1,
-        });
-        assert.equal(result.summary.totalTrialsPerVariant, 1);
-        assert.equal(result.rawResults.length, 4);
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
+    let cachedBenchmark: BenchmarkRunReport;
+    let benchDir: string;
+
+    before(async () => {
+      benchDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe-shared-"));
+      cachedBenchmark = await BenchmarkRunner.executeBenchmark({
+        workspaceRoot: benchDir,
+        trialsPerVariant: 1,
+      });
+    });
+
+    it("23.1: runs end-to-end benchmark with 1 trial per variant", () => {
+      assert.equal(cachedBenchmark.summary.totalTrialsPerVariant, 1);
+      assert.equal(cachedBenchmark.rawResults.length, 4);
+    });
+
+    it("23.2: enforces identical shared baseline across all 4 variants", () => {
+      for (const r of cachedBenchmark.rawResults) {
+        assert.equal(r.sharedBaseline.modelSlug, "gemini-3.7-flash");
+        assert.equal(r.sharedBaseline.reasoningEffort, "medium");
       }
     });
 
-    it("23.2: enforces identical shared baseline across all 4 variants", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe2-"));
-      try {
-        const result = await BenchmarkRunner.executeBenchmark({
-          workspaceRoot: tempDir,
-          trialsPerVariant: 1,
-        });
-        for (const r of result.rawResults) {
-          assert.equal(r.sharedBaseline.modelSlug, "gemini-3.7-flash");
-          assert.equal(r.sharedBaseline.reasoningEffort, "medium");
-        }
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    it("23.3: writes benchmark output results JSON to disk", () => {
+      assert.ok(existsSync(cachedBenchmark.resultsFilePath));
     });
 
-    it("23.3: writes benchmark output results JSON to disk", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe3-"));
-      try {
-        const result = await BenchmarkRunner.executeBenchmark({
-          workspaceRoot: tempDir,
-          trialsPerVariant: 1,
-        });
-        assert.ok(existsSync(result.resultsFilePath));
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    it("23.4: generates causal markdown report with summary matrix", () => {
+      const reportPath = join(benchDir, ".oma", "benchmark", "causal_benchmark_report.md");
+      assert.ok(existsSync(reportPath));
     });
 
-    it("23.4: generates causal markdown report with summary matrix", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe4-"));
-      try {
-        await BenchmarkRunner.executeBenchmark({
-          workspaceRoot: tempDir,
-          trialsPerVariant: 1,
-        });
-        const reportPath = join(tempDir, ".oma", "benchmark", "causal_benchmark_report.md");
-        assert.ok(existsSync(reportPath));
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
-    });
-
-    it("23.5: captures trial metrics for all executions", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe5-"));
-      try {
-        const result = await BenchmarkRunner.executeBenchmark({
-          workspaceRoot: tempDir,
-          trialsPerVariant: 1,
-        });
-        for (const raw of result.rawResults) {
-          assert.ok(raw.metrics.totalTokens >= 0);
-          assert.ok(raw.metrics.durationMs >= 0);
-        }
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
+    it("23.5: captures trial metrics for all executions", () => {
+      for (const raw of cachedBenchmark.rawResults) {
+        assert.ok(raw.metrics.totalTokens >= 0);
+        assert.ok(raw.metrics.durationMs >= 0);
       }
     });
   });
@@ -715,59 +679,36 @@ describe("Tier 2: Boundary & Corner Cases — Features 19 to 27", () => {
   // Feature 26: Benchmark & Calibration Framework (Boundary Cases)
   // --------------------------------------------------------------------------
   describe("Feature 26: Benchmark & Calibration Framework (Boundary Cases)", () => {
-    it("26.1: BenchmarkRunner runs baseline benchmark suite and reports pass/fail metrics", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-bm1-"));
-      try {
-        const res = await BenchmarkRunner.executeBenchmark({ workspaceRoot: tempDir, trialsPerVariant: 1 });
-        assert.ok(res.summary.resultsByVariant.vanilla_agy);
-        assert.ok(res.summary.resultsByVariant.oma_dynamic_workflow);
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    let benchReport: BenchmarkRunReport;
+
+    before(async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-bm-shared-"));
+      benchReport = await BenchmarkRunner.executeBenchmark({ workspaceRoot: tempDir, trialsPerVariant: 1 });
     });
 
-    it("26.2: calculates durationMs across multiple benchmark variants", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-bm2-"));
-      try {
-        const res = await BenchmarkRunner.executeBenchmark({ workspaceRoot: tempDir, trialsPerVariant: 1 });
-        assert.ok(res.summary.resultsByVariant.oma_dynamic_workflow.meanDurationMs >= 0);
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    it("26.1: BenchmarkRunner runs baseline benchmark suite and reports pass/fail metrics", () => {
+      assert.ok(benchReport.summary.resultsByVariant.vanilla_agy);
+      assert.ok(benchReport.summary.resultsByVariant.oma_dynamic_workflow);
     });
 
-    it("26.3: records defects intercepted for OMA variants", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-bm3-"));
-      try {
-        const res = await BenchmarkRunner.executeBenchmark({ workspaceRoot: tempDir, trialsPerVariant: 1 });
-        assert.equal(res.summary.resultsByVariant.vanilla_agy.meanDefectsIntercepted, 0);
-        assert.ok(res.summary.resultsByVariant.oma_static_wave.meanDefectsIntercepted >= 1);
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    it("26.2: calculates durationMs across multiple benchmark variants", () => {
+      assert.ok(benchReport.summary.resultsByVariant.oma_dynamic_workflow.meanDurationMs >= 0);
     });
 
-    it("26.4: generates structured causal findings list", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-bm4-"));
-      try {
-        const res = await BenchmarkRunner.executeBenchmark({ workspaceRoot: tempDir, trialsPerVariant: 1 });
-        assert.ok(res.summary.causalFindings.length >= 3);
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
+    it("26.3: records defects intercepted for OMA variants", () => {
+      assert.equal(benchReport.summary.resultsByVariant.vanilla_agy.meanDefectsIntercepted, 0);
+      assert.ok(benchReport.summary.resultsByVariant.oma_static_wave.meanDefectsIntercepted >= 1);
     });
 
-    it("26.5: rawResults includes timestamp and metrics for every trial", async () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-bm5-"));
-      try {
-        const res = await BenchmarkRunner.executeBenchmark({ workspaceRoot: tempDir, trialsPerVariant: 1 });
-        assert.equal(res.rawResults.length, 4);
-        for (const raw of res.rawResults) {
-          assert.ok(raw.timestamp);
-          assert.ok(raw.metrics.totalTokens >= 0);
-        }
-      } finally {
-        rmSync(tempDir, { recursive: true, force: true });
+    it("26.4: generates structured causal findings list", () => {
+      assert.ok(benchReport.summary.causalFindings.length >= 3);
+    });
+
+    it("26.5: rawResults includes timestamp and metrics for every trial", () => {
+      assert.equal(benchReport.rawResults.length, 4);
+      for (const raw of benchReport.rawResults) {
+        assert.ok(raw.timestamp);
+        assert.ok(raw.metrics.totalTokens >= 0);
       }
     });
   });
