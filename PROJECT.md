@@ -68,14 +68,14 @@ Oh My AntiGravity (OMA) est un système d'orchestration résilient et détermini
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|---|---|---|---|
-| M1 | Multi-Expert Runtime & Confinement | R1: CapabilityResolver, AgyDriver, ProcessRunner (Win32 Job Object), WorktreePool, ParallelScheduler | none | PLANNED |
-| M2 | Graph Governance & CAS Broker | R2: Graph schema, Kahn DFS acyclicity, CAS revision publisher, Kernel readySet, Node immutability | M1 | PLANNED |
-| M3 | Dynamic Workflow & Convergence Loop | R3: ObjectiveJudge, DynamicConvergenceEngine, GraphProposal, Corrective Waves (Fixer) | M2 | PLANNED |
-| M4 | Traceability, Dual Reviews & Git 2PC | R4: MissionEventsStore (SHA-256 chain), Myers diffs, AdversarialReviewEngine, Git 2PC promotion | M2, M3 | PLANNED |
-| M5 | Deterministic Mission Resumption | R5: MissionProjectionEngine, MissionResumptionEngine, Epoch fencing, Idempotent `oma resume` | M2, M4 | PLANNED |
-| M6 | Empirical Causal Benchmark | R6: BenchmarkRunner (4 variants), Hidden test suites, Metrics collection, JSON/Markdown reporting | M1-M5 | PLANNED |
-| E2E | E2E Testing Track | Independent opaque-box test suite (Tiers 1-4) covering all features from requirements | parallel with M1-M6 | PLANNED |
-| Final | Final Integration & Adversarial Hardening | Pass 100% E2E test suite + Tier 5 adversarial coverage hardening (Challenger loop) | M1-M6, E2E | PLANNED |
+| M1 | Multi-Expert Runtime & Confinement | R1: CapabilityResolver, AgyDriver, ProcessRunner (Win32 Job Object), WorktreePool, ParallelScheduler | none | DONE |
+| M2 | Graph Governance & CAS Broker | R2: Graph schema, Kahn DFS acyclicity, CAS revision publisher, Kernel readySet, Node immutability | M1 | DONE |
+| M3 | Dynamic Workflow & Convergence Loop | R3: ObjectiveJudge, DynamicConvergenceEngine, GraphProposal, Corrective Waves (Fixer) | M2 | DONE |
+| M4 | Traceability, Dual Reviews & Git 2PC | R4: MissionEventsStore (SHA-256 chain), Myers diffs, AdversarialReviewEngine, Git 2PC promotion | M2, M3 | DONE |
+| M5 | Deterministic Mission Resumption | R5: MissionProjectionEngine, MissionResumptionEngine, Epoch fencing, Idempotent `oma resume` | M2, M4 | DONE |
+| M6 | Empirical Causal Benchmark | R6: BenchmarkRunner (4 variants), Hidden test suites, Metrics collection, JSON/Markdown reporting | M1-M5 | DONE |
+| E2E | E2E Testing Track | Independent opaque-box test suite (Tiers 1-4) covering all features from requirements | parallel with M1-M6 | DONE (285/285 PASS) |
+| Final | Final Integration & Adversarial Hardening | Pass 100% E2E test suite + Tier 5 adversarial coverage hardening (Challenger loop) | M1-M6, E2E | DONE (Tier 5 21/21 PASS) |
 
 ---
 
