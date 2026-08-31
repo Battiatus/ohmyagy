@@ -182,8 +182,8 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                     revision: 1,
                     schedulerAuthorityId: "oma-scheduler",
                     nodes: [
-                        { id: "task_prep", title: "Prep", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker" },
-                        { id: "task_heavy", title: "Heavy Compute", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker" },
+                        { id: "task_prep", title: "Prep", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "planner" } },
+                        { id: "task_heavy", title: "Heavy Compute", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "worker" } },
                     ],
                     edges: [
                         { id: "e1", from: "task_prep", to: "task_heavy", when: "success" },
@@ -204,7 +204,9 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                     nodeId: "task_prep",
                     dispatchId: "disp-prep",
                     outcome: "success",
+                    authority: "broker",
                     authorityId: "oma-broker",
+                    evidenceHash: "0000000000000000000000000000000000000000000000000000000000000000",
                 });
                 appendGraphTransition(runtime, {
                     eventType: "node_dispatched",
@@ -216,14 +218,14 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 mkdirSync(join(tempDir, ".oma", "worktrees"), { recursive: true });
                 mkdirSync(zombieWorktree, { recursive: true });
                 writeFileSync(join(zombieWorktree, "dirty.tmp"), "uncommitted crash state");
-                const resumption = DeterministicResumeEngine.resume({
+                const resumption = await DeterministicResumeEngine.resume({
                     workspaceRoot: tempDir,
                 });
-                assert.equal(resumption.interruptedTasksRecovered.length, 1);
-                assert.equal(resumption.interruptedTasksRecovered[0], "task_heavy");
+                assert.equal(resumption.inFlightResumed.length, 1);
+                assert.equal(resumption.inFlightResumed[0], "task_heavy");
                 assert.equal(resumption.activeEpoch, 2, "Active epoch must advance from 1 to 2");
-                assert.ok(resumption.projectedReadySet.includes("task_heavy"));
-                assert.ok(!resumption.projectedReadySet.includes("task_prep"));
+                assert.ok(resumption.readySet.includes("task_heavy"));
+                assert.ok(!resumption.readySet.includes("task_prep"));
                 assert.equal(existsSync(zombieWorktree), false);
             }
             finally {
@@ -244,11 +246,13 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 const content = readFileSync(eventsPath, "utf8");
                 const tamperedContent = content.replace('"status":"failed"', '"status":"succeeded"');
                 writeFileSync(eventsPath, tamperedContent, "utf8");
-                const tamperedStore = new JournalStore(eventsPath);
-                const integrity = tamperedStore.verifyIntegrity();
-                assert.equal(integrity.valid, false);
-                assert.ok(integrity.error?.includes("Hash mismatch") || integrity.error?.includes("mismatch"));
-                const chainCheck = MissionEventsStore.verifyEventChain(eventsPath);
+                assert.throws(() => new JournalStore(eventsPath), (err) => {
+                    assert.ok(err instanceof Error);
+                    assert.ok(err.message.includes("integrity") || err.message.includes("mismatch") || err.code === "INTEGRITY_ERROR");
+                    return true;
+                });
+                const events = MissionEventsStore.readEvents(eventsPath);
+                const chainCheck = MissionEventsStore.verifyEventChain(events);
                 assert.equal(chainCheck.valid, false);
             }
             finally {
@@ -272,10 +276,11 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 writeFileSync(eventsPath, lines.join("\n") + "\n", "utf8");
                 assert.throws(() => new JournalStore(eventsPath), (err) => {
                     assert.ok(err instanceof Error);
-                    assert.ok(err.message.includes("integrity") || err.message.includes("mismatch"));
+                    assert.ok(err.message.includes("integrity") || err.message.includes("mismatch") || err.code === "INTEGRITY_ERROR");
                     return true;
                 });
-                const check = MissionEventsStore.verifyEventChain(eventsPath);
+                const events = MissionEventsStore.readEvents(eventsPath);
+                const check = MissionEventsStore.verifyEventChain(events);
                 assert.equal(check.valid, false);
             }
             finally {
@@ -293,11 +298,19 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 appendFileSync(eventsPath, '{"eventType":"run_started","timestamp":"2026-08-31T\n', "utf8");
                 assert.throws(() => new JournalStore(eventsPath), (err) => {
                     assert.ok(err instanceof Error);
-                    assert.ok(err.message.includes("JSON") || err.message.includes("Corrupt") || err.message.includes("Unterminated"));
+                    assert.ok(err.message.includes("JSON") || err.message.includes("Corrupt") || err.message.includes("Unterminated") || err.code === "CORRUPT_TAIL");
                     return true;
                 });
-                const check = MissionEventsStore.verifyEventChain(eventsPath);
-                assert.equal(check.valid, false);
+                let chainValid = false;
+                try {
+                    const events = MissionEventsStore.readEvents(eventsPath);
+                    const check = MissionEventsStore.verifyEventChain(events);
+                    chainValid = check.valid;
+                }
+                catch {
+                    chainValid = false;
+                }
+                assert.equal(chainValid, false);
             }
             finally {
                 rmSync(tempDir, { recursive: true, force: true });
@@ -450,7 +463,7 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 const broker = new GraphBroker(tempDir);
                 const proposals = Array.from({ length: 5 }, (_, i) => ({
                     schemaVersion: 2,
-                    proposalId: `prop-race-${i}`,
+                    proposalId: `prop_race_${i}`,
                     author: `worker-${i}`,
                     reason: `Concurrent addition ${i}`,
                     expectedRevision: 1,
@@ -490,14 +503,16 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 rmSync(tempDir, { recursive: true, force: true });
             }
         });
-        it("4.3: cleans up entire worktree pool cleanly on pool.cleanup()", async () => {
+        it("4.3: cleans up entire worktree pool cleanly on pool.purgeOrphans()", async () => {
             const tempDir = mkdtempSync(join(tmpdir(), "oma-t5-pool-clean-"));
             try {
                 const pool = new WorktreePool({ workspaceRoot: tempDir });
                 await pool.acquire("task-1");
                 await pool.acquire("task-2");
                 assert.equal(pool.getActiveWorktrees().size, 2);
-                await pool.cleanup();
+                await pool.release("task-1");
+                await pool.release("task-2");
+                await pool.purgeOrphans();
                 assert.equal(pool.getActiveWorktrees().size, 0);
             }
             finally {

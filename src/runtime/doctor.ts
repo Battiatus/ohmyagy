@@ -82,9 +82,10 @@ export class OmaDoctor {
 
     const agyBinCandidates = [
       process.env.OMA_AGY_BIN,
-      "agy.cmd",
       "agy.exe",
       "agy",
+      "agy.cmd",
+      "gemini.exe",
       "gemini.cmd",
       "gemini",
     ].filter(Boolean) as string[];
