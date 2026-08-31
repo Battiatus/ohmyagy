@@ -1,6 +1,5 @@
 import { posix } from "node:path";
-import { canonicalJson, hashJson, sha256 } from "../control/canonical.js";
-import { isRecord } from "../control/model.js";
+import { canonicalJson, hashJson, isRecord, sha256 } from "../ledger/canonical.js";
 
 export type BrokerRejectionCode =
   | "malformed_proposal"

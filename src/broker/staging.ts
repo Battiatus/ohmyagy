@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { sha256 } from "../ledger/canonical.js";
 import {
   ChangeProposal,
   ValidatedTransaction,
@@ -49,6 +50,8 @@ export interface StagedTransaction {
   containerPath: string;
   worktreePath: string;
   transaction: ValidatedTransaction;
+  canonicalDiff: string;
+  stagedDiffDigest: string;
 }
 
 export function snapshotCleanGitWorkspace(repositoryRoot: string): GitWorkspaceState {
@@ -104,11 +107,16 @@ export function stageProposal(
       }
     }
 
+    runGit(worktreePath, ["add", "-A"]);
+    const canonicalDiff = canonicalStagedDiff(worktreePath);
+
     const staged = {
       repositoryRoot: source.repositoryRoot,
       containerPath,
       worktreePath,
       transaction,
+      canonicalDiff,
+      stagedDiffDigest: sha256(canonicalDiff),
     };
     assertStagedTransactionState(staged);
     return staged;
@@ -124,6 +132,25 @@ export function stageProposal(
       worktreePath,
     );
   }
+}
+
+export function refreshCanonicalStagedDiff(staged: StagedTransaction): string {
+  assertOwnedStagingPaths(staged.containerPath, staged.worktreePath);
+  runGit(staged.worktreePath, ["add", "-A"]);
+  return canonicalStagedDiff(staged.worktreePath);
+}
+
+export function canonicalCommitDiff(
+  repositoryRoot: string,
+  parentVersion: string,
+  commitSha: string,
+): string {
+  return runGit(repositoryRoot, [
+    ...canonicalDiffOptions(),
+    parentVersion,
+    commitSha,
+    "--",
+  ]);
 }
 
 export function discardStagedTransaction(staged: StagedTransaction): void {
@@ -312,6 +339,34 @@ function runGit(root: string, args: string[]): string {
     );
   }
   return result.stdout;
+}
+
+function canonicalStagedDiff(worktreePath: string): string {
+  return runGit(worktreePath, [
+    ...canonicalDiffOptions(),
+    "--cached",
+    "HEAD",
+    "--",
+  ]);
+}
+
+function canonicalDiffOptions(): string[] {
+  return [
+    "-c",
+    "diff.algorithm=myers",
+    "-c",
+    "diff.renames=false",
+    "-c",
+    "core.quotePath=false",
+    "diff",
+    "--binary",
+    "--full-index",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-renames",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+  ];
 }
 
 function runGitAllowFailure(

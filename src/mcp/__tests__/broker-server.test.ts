@@ -12,10 +12,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import test from "node:test";
 import { contentHash } from "../../broker/transaction.js";
-import { isRecord } from "../../control/model.js";
+import { isRecord } from "../../ledger/canonical.js";
 import { installWorkspacePlugin } from "../../packaging/install.js";
 
-test("installs a placeholder-free Antigravity plugin and promotes through its only MCP tool", () => {
+test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 2-Phase Commit lifecycle", () => {
   const fixture = createRepository(false);
   try {
     const installed = installWorkspacePlugin(fixture.root, {
@@ -39,11 +39,22 @@ test("installs a placeholder-free Antigravity plugin and promotes through its on
     commitAll(fixture.root, "fixture with plugin");
     const parent = git(fixture.root, ["rev-parse", "HEAD"]);
 
-    const responses = runMcp(fixture.root, [
+    // 1. Initialize and list tools
+    const responses1 = runMcp(fixture.root, [
       initializeRequest(1),
       { jsonrpc: "2.0", method: "notifications/initialized" },
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
-      toolCall(3, {
+    ]);
+    const listed = resultFor(responses1, 2);
+    assert.ok(Array.isArray(listed.tools));
+    assert.equal(listed.tools.length, 3);
+    const toolNames = listed.tools.map((t: { name: string }) => t.name).sort();
+    assert.deepEqual(toolNames, ["attest_review", "promote_change", "propose_change"]);
+
+    // 2. Propose change -> returns staged_pending_review without modifying HEAD
+    const responses2 = runMcp(fixture.root, [
+      initializeRequest(1),
+      toolCall(2, "propose_change", {
         schemaVersion: 1,
         parentVersion: parent,
         operations: [
@@ -51,23 +62,139 @@ test("installs a placeholder-free Antigravity plugin and promotes through its on
         ],
       }),
     ]);
-    assert.equal(responses.length, 3);
-    const listed = resultFor(responses, 2);
-    assert.ok(Array.isArray(listed.tools));
-    assert.equal(listed.tools.length, 1);
-    assert.ok(isRecord(listed.tools[0]));
-    assert.equal(listed.tools[0].name, "propose_change");
-    const called = resultFor(responses, 3);
-    assert.ok(isRecord(called.structuredContent));
+    const proposeResult = resultFor(responses2, 2);
+    assert.ok(isRecord(proposeResult.structuredContent));
     assert.equal(
-      called.structuredContent.status,
-      "promoted",
-      JSON.stringify(called.structuredContent),
+      proposeResult.structuredContent.status,
+      "staged_pending_review",
+      JSON.stringify(proposeResult.structuredContent),
     );
-    assert.equal(called.isError, false);
+    assert.equal(proposeResult.isError, false);
+    const txId = String(proposeResult.structuredContent.transactionId);
+    const stagedDiffDigest = String(proposeResult.structuredContent.stagedDiffDigest);
+    assert.ok(txId);
+    assert.ok(stagedDiffDigest);
+
+    // Repository root is untouched after propose_change
+    assert.equal(readFileSync(join(fixture.root, "a.txt"), "utf8"), "old");
+    assert.equal(git(fixture.root, ["rev-parse", "HEAD"]), parent);
+    assert.equal(git(fixture.root, ["status", "--porcelain=v1"]), "");
+
+    // 3. Full 2PC commit through stdio session: propose -> attest -> promote
+    const responses3 = runMcp(fixture.root, [
+      initializeRequest(1),
+      toolCall(2, "propose_change", {
+        schemaVersion: 1,
+        parentVersion: parent,
+        operations: [
+          { kind: "write", path: "a.txt", baseHash: contentHash("old"), content: "new" },
+        ],
+      }),
+      // Attempt unreviewed promotion -> must be rejected
+      toolCall(3, "promote_change", {
+        transactionId: txId,
+      }),
+      // Independent reviewer attestation (Author != Reviewer)
+      toolCall(4, "attest_review", {
+        transactionId: txId,
+        stagedDiffDigest,
+        reviewerRunKey: "run-reviewer-1",
+        reviewerExpertId: "oma-reviewer",
+        verdict: "approved",
+      }),
+      // Promotion after valid review -> must succeed
+      toolCall(5, "promote_change", {
+        transactionId: txId,
+      }),
+    ]);
+
+    // Check unreviewed promotion rejection
+    const unreviewedResult = resultFor(responses3, 3);
+    assert.ok(isRecord(unreviewedResult.structuredContent));
+    assert.equal(unreviewedResult.structuredContent.status, "rejected");
+    assert.equal(unreviewedResult.isError, true);
+
+    // Check review attestation
+    const attestResult = resultFor(responses3, 4);
+    assert.ok(isRecord(attestResult.structuredContent));
+    assert.equal(attestResult.structuredContent.status, "review_attested");
+    assert.equal(attestResult.structuredContent.reviewerVerdict, "approved");
+    assert.equal(attestResult.isError, false);
+
+    // Check promotion
+    const promoteResult = resultFor(responses3, 5);
+    assert.ok(isRecord(promoteResult.structuredContent));
+    assert.equal(
+      promoteResult.structuredContent.status,
+      "promoted",
+      JSON.stringify(promoteResult.structuredContent),
+    );
+    assert.equal(promoteResult.isError, false);
+
+    // HEAD is now updated and content on disk is "new"
     assert.equal(readFileSync(join(fixture.root, "a.txt"), "utf8"), "new");
     assert.notEqual(git(fixture.root, ["rev-parse", "HEAD"]), parent);
     assert.equal(git(fixture.root, ["status", "--porcelain=v1"]), "");
+  } finally {
+    rmSync(fixture.container, { recursive: true, force: true });
+  }
+});
+
+test("self-review (Author == Reviewer) is rejected during promote_change", () => {
+  const fixture = createRepository(false);
+  try {
+    installWorkspacePlugin(fixture.root, {
+      gates: [nodeGate("pass", "process.exit(0)")],
+    });
+    commitAll(fixture.root, "fixture with plugin");
+    const parent = git(fixture.root, ["rev-parse", "HEAD"]);
+
+    const responses1 = runMcp(fixture.root, [
+      initializeRequest(1),
+      toolCall(2, "propose_change", {
+        schemaVersion: 1,
+        parentVersion: parent,
+        operations: [
+          { kind: "write", path: "a.txt", baseHash: contentHash("old"), content: "new" },
+        ],
+      }),
+    ]);
+
+    const proposed = resultFor(responses1, 2);
+    assert.ok(isRecord(proposed.structuredContent));
+    const content = proposed.structuredContent as Record<string, unknown>;
+    const txId = String(content.transactionId);
+    const diffDigest = String(content.stagedDiffDigest);
+
+    // Now run self-review test with exact transactionId
+    const responsesSelf = runMcp(fixture.root, [
+      initializeRequest(1),
+      toolCall(2, "propose_change", {
+        schemaVersion: 1,
+        parentVersion: parent,
+        operations: [
+          { kind: "write", path: "a.txt", baseHash: contentHash("old"), content: "new" },
+        ],
+      }),
+      toolCall(3, "attest_review", {
+        transactionId: txId,
+        stagedDiffDigest: diffDigest,
+        reviewerRunKey: "run-self-reviewer",
+        reviewerExpertId: "oma-executor", // SAME as author
+        verdict: "approved",
+      }),
+      toolCall(4, "promote_change", {
+        transactionId: txId,
+      }),
+    ]);
+
+    const promoteResult = resultFor(responsesSelf, 4);
+    assert.ok(isRecord(promoteResult.structuredContent));
+    const promoteContent = promoteResult.structuredContent as Record<string, unknown>;
+    assert.equal(promoteContent.status, "rejected");
+    assert.equal(promoteResult.isError, true);
+    assert.equal(git(fixture.root, ["rev-parse", "HEAD"]), parent);
+    assert.equal(readFileSync(join(fixture.root, "a.txt"), "utf8"), "old");
   } finally {
     rmSync(fixture.container, { recursive: true, force: true });
   }
@@ -83,7 +210,7 @@ test("a failing fixed gate prevents MCP promotion and leaves source unchanged", 
     const parent = git(fixture.root, ["rev-parse", "HEAD"]);
     const responses = runMcp(fixture.root, [
       initializeRequest(1),
-      toolCall(2, {
+      toolCall(2, "propose_change", {
         schemaVersion: 1,
         parentVersion: parent,
         operations: [
@@ -122,7 +249,7 @@ test("the MCP broker rejects proposals targeting plugin and graph authority file
     const existing = readFileSync(join(fixture.root, ...protectedPath.split("/")), "utf8");
     const responses = runMcp(fixture.root, [
       initializeRequest(1),
-      toolCall(2, {
+      toolCall(2, "propose_change", {
         schemaVersion: 1,
         parentVersion: parent,
         operations: [
@@ -134,7 +261,7 @@ test("the MCP broker rejects proposals targeting plugin and graph authority file
           },
         ],
       }),
-      toolCall(3, {
+      toolCall(3, "propose_change", {
         schemaVersion: 1,
         parentVersion: parent,
         operations: [
@@ -173,7 +300,7 @@ test("graph authority protection runs before Git repository discovery", () => {
     });
     const responses = runMcp(root, [
       initializeRequest(1),
-      toolCall(2, {
+      toolCall(2, "propose_change", {
         schemaVersion: 1,
         parentVersion: "not-a-git-head",
         operations: [
@@ -196,7 +323,7 @@ test("graph authority protection runs before Git repository discovery", () => {
   }
 });
 
-function runMcp(root: string, messages: unknown[]): unknown[] {
+function runMcp(root: string, messages: unknown[], _options?: unknown): unknown[] {
   const rawConfig = JSON.parse(
     readFileSync(join(root, ".agents", "plugins", "oma", "mcp_config.json"), "utf8"),
   ) as unknown;
@@ -260,12 +387,12 @@ function initializeRequest(id: number) {
   };
 }
 
-function toolCall(id: number, args: unknown) {
+function toolCall(id: number, name: string, args: unknown) {
   return {
     jsonrpc: "2.0",
     id,
     method: "tools/call",
-    params: { name: "propose_change", arguments: args },
+    params: { name, arguments: args },
   };
 }
 

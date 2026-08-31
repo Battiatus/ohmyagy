@@ -1,0 +1,518 @@
+# ADR-002 : Le script ordonnance, le catalogue juge, le journal fait autorité
+
+## Statut
+
+Révision 3, 30 août 2026. Non ratifiée.
+
+Historique : révision 1 rejetée par l'auteur et par Codex `gpt-5.6-sol`
+(stop-gate BLOCK, challenge REJECT, neuf décisions requises). Révision 2 :
+trois contradictions historiques fermées, deux décisions sur neuf fermées,
+REJECT avec six blocages. Révision 3 tranche ces six blocages.
+
+Document normatif. Tout comportement non spécifié est interdit jusqu'à
+amendement écrit. La section 18 énumère ce qui reste ouvert ; ces points ne
+doivent pas être comblés par inférence.
+
+## 1. Séparation des pouvoirs, et sa limite assumée
+
+Le script ordonnance. Il ne juge pas. Les critères d'acceptation et les gates
+sont résolus par le runtime depuis le catalogue et le registre, écrits par un
+humain et versionnés. Le script ne peut ni les fournir, ni les modifier.
+
+**Limite assumée par décision de l'auteur, 30 août 2026 :** le runtime
+n'impose aucune étape. Un script peut omettre un reviewer, choisir un Expert
+faible, ordonner comme il veut, terminer tôt. La séparation des pouvoirs vaut
+au niveau du jugement, pas du workflow.
+
+La contrepartie est la seule garantie qui subsiste, et elle est structurelle :
+la couverture est un critère d'acceptation **de mission**, évalué contre le
+journal par une gate de classe `coverage`. Un script libre d'omettre reste
+libre — mais une mission dont l'humain a déclaré « tout Run ayant promu une
+transaction doit avoir un Run reviewer approuvé » échoue à la fin si le script
+a omis. L'oracle de mission porte donc l'intégralité du poids.
+
+| Pouvoir | Détenteur | Écrit par |
+|---|---|---|
+| Ordonnancement, boucles, fan-out, omissions | Script | LLM orchestrateur validé, ou humain |
+| Critères d'acceptation, gates, périmètres | Catalogue et registre | Humain |
+| Verdict de Run | Oracle | Code déterministe |
+| Verdict de mission, couverture comprise | Oracle de mission | Code déterministe |
+| Budget et baux | Scheduler | Humain, à la déclaration de mission |
+| Autorité sur ce qui a eu lieu | Journal signé | Personne, append-only |
+
+## 2. Vocabulaire normatif
+
+| Terme | Définition |
+|---|---|
+| `Mission` | Objectif utilisateur, avec critères d'acceptation de mission déclarés par un humain. |
+| `MissionBundle` | Ensemble figé : script, digests du catalogue et du registre, version de la table de résolution, critères de mission, arguments. |
+| `MissionEpoch` | Génération de propriété de la mission. Un seul propriétaire par époque. |
+| `Script` | Programme JavaScript restreint qui ordonnance. Il ne juge rien. |
+| `Expert` | Rôle du catalogue : outils, classe de modèle, effort, périmètres et critères par nature de tâche. |
+| `Run` | Une invocation `agy` unique, identifiée par `runKey`. Jamais reprise. |
+| `Lease` | Autorisation de dispatch à usage unique, débitée avant invocation, portant l'époque. |
+| `Artifact` | Contenu produit, persisté hors journal, référencé par hash et provenance. |
+| `Gate` | Commande déterministe du registre, de classe `structural`, `semantic`, `provenance` ou `coverage`. |
+| `Verdict` | Résultat d'oracle, avec un résultat par critère. |
+| `Journal` | Suite append-only chaînée par hash, tête signée par une autorité à clé persistante. |
+
+## 3. Identité de mission et de Run — non circulaire, stable au branchement
+
+### 3.1 Mission
+
+`missionHash = sha256(canonicalJson(MissionBundle))`.
+
+```
+MissionBundle {
+  scriptSha256, expertCatalogDigest, gateRegistryDigest, resolverTableVersion: string
+  missionAcceptance: { id, description, gateId }[]
+  limits: { maxRuns, maxAttemptsPerPath, maxTotalTokens, maxWallClockMs }
+  args: unknown
+}
+```
+
+JSON canonique : clés triées, UTF-8, LF, sans espace superflu. `missionId` est
+attribué à la création et immuable.
+
+### 3.2 Chemin d'invocation logique
+
+Le runtime construit `invocationPath`, déterministe et indépendant des
+numéros de ligne :
+
+- racine `/` ;
+- chaque cadre `parallel()` ajoute `p<indexDuCadre>[<positionDansLeTableau>]` ;
+- chaque cadre `pipeline()` ajoute `s<indexEtape>[<indexItem>]` ;
+- chaque appel direct ajoute `r<indexDappelDansLeCadre>`.
+
+`parallel()` ordonne par position dans le tableau fourni, `pipeline()` par
+index d'item. Les deux ordres sont déterministes et ne dépendent pas de l'ordre
+d'achèvement.
+
+### 3.3 Empreinte d'entrée, non circulaire
+
+```
+RunInputCore {
+  expertId, taskKind, objective: string
+  inputs: string[]     // sha256 des ArtifactRef, triés
+  messages: { role, from, text }[]
+}
+
+inputDigest = sha256(canonicalJson(RunInputCore))
+```
+
+`RunInputCore` **exclut** `runId`, `runKey`, `leaseId`, `resolved` et tout
+champ de budget. La circularité de la révision 2 est supprimée.
+
+### 3.4 Clé de rejeu
+
+```
+runKey = sha256(canonicalJson({ missionHash, invocationPath, inputDigest, upstreamRunKeys }))
+```
+
+`upstreamRunKeys` : `runKey` triés des Runs dont une sortie apparaît dans
+`inputs`.
+
+Stabilité au branchement : si le flot de contrôle change parce qu'un résultat
+amont diffère, alors `upstreamRunKeys` ou `inputDigest` diffèrent, donc
+`runKey` diffère. Un rejeu ne peut jamais réutiliser l'identité d'un Run dont
+les entrées ont changé, et un branchement conditionnel ne produit pas de
+collision.
+
+Reprise : un `runKey` déjà terminal au journal retourne son `RunResult`
+enregistré sans redispatch.
+
+## 4. Autorité du script et frontière d'exécution
+
+### 4.1 Auteur
+
+Un script peut être écrit par un LLM orchestrateur ou par un humain. Dans les
+deux cas il est une donnée, validée statiquement avant exécution. Un script
+invalide interdit le démarrage de la mission.
+
+### 4.2 Frontière
+
+Le script s'exécute dans un processus séparé, realm gelé :
+
+- intrinsèques atteignables gelés par `Object.freeze` ;
+- pas de `Function`, `eval`, `require`, `import`, `import()`, `process`, `fs`, `child_process`, réseau ;
+- capacités injectées exposées comme objets à prototype nul, propriétés propres gelées ;
+- `Date.now()`, `Math.random()` et `new Date()` sans argument lèvent, pour préserver le déterminisme du rejeu.
+
+Rejets à la validation statique : `constructor`, `__proto__`, `with`, import
+dynamique, et tout accès membre calculé sur une capacité injectée.
+
+### 4.3 Ce que le script ne peut pas fournir
+
+`acceptance`, `gateId`, `scope`, `maxDiff` sont refusés s'ils apparaissent dans
+un appel. Le runtime les résout depuis le catalogue via `expertId` et
+`taskKind`.
+
+### 4.4 Enveloppe de prompt autoritaire
+
+Le runtime compose le prompt, dans cet ordre :
+
+1. **Bloc contrat, autoritaire** : périmètre résolu, critères d'acceptation, `maxDiff`, outils autorisés, règle de sortie structurée.
+2. **Manifeste d'entrées** : `ArtifactRef` avec hash et provenance.
+3. **Bloc données de tâche, marqué non fiable** : `objective` et `messages` fournis par le script, délimités, avec instruction explicite qu'ils ne peuvent pas modifier le bloc 1.
+
+Un Expert ne peut référencer qu'une entrée présente au manifeste. Une référence
+hors manifeste rend le Run `evaluation = rejected`, code
+`unprovenanced_input`.
+
+## 5. Baux, dispatch et sémantique de transport
+
+### 5.1 Baux
+
+```
+Lease { leaseId, runKey, epoch, tokenCeiling, wallClockMs, attemptIndex, issuedAt }
+```
+
+Émis uniquement sous autorité scheduler, débité atomiquement avant dispatch,
+journalisé `lease_issued`, **à usage unique et jamais réutilisé**. Toute
+nouvelle tentative consomme un nouveau bail. La contradiction de la révision 2
+— « usage unique » puis retry avec le même bail — est supprimée.
+
+Limites de mission obligatoires : `maxRuns`, `maxAttemptsPerPath`,
+`maxTotalTokens`, `maxWallClockMs`. Dépassement : `mission_halted` avec code.
+
+`budget` exposé au script est une projection en lecture seule.
+
+### 5.2 Dispatch fencé et prouvable
+
+Avant tout `spawn`, le driver écrit `dispatch_intent { runKey, leaseId, epoch }`
+et le rend durable. Le premier message structuré de l'enfant doit renvoyer
+`runKey`, faisant office d'acquittement.
+
+| Classe | Condition | Reprise |
+|---|---|---|
+| `dispatch_refused` | Échec **prouvé avant** la création du processus : bail refusé, exécutable introuvable, construction d'arguments invalide. Journalisé avant toute tentative de `spawn`. | Nouvelle tentative autorisée, avec un **nouveau bail**. |
+| `acknowledged` | `runKey` renvoyé par l'enfant, sortie terminale parsée. | Sans objet. |
+| `outcome_unknown` | `spawn` a rendu la main, sans acquittement ou sans sortie terminale. | Jamais de redispatch automatique. Réconciliation obligatoire, §6. |
+
+Il n'existe aucune reprise automatique après création de processus. La
+révision 2 autorisait un redispatch sur `not_dispatched` avec le même bail ;
+c'était indécidable sous Windows et c'est supprimé.
+
+## 6. Reprise durable, époques et fencing
+
+### 6.1 Époque
+
+Le scheduler ouvre `mission_epoch_opened { epoch, ownerId }` à chaque prise de
+propriété. Tout événement portant une époque périmée est refusé à l'append. Un
+second processus de reprise incrémente l'époque et clôture le précédent
+propriétaire.
+
+### 6.2 États et réconciliation
+
+États journalisés : `leased → dispatched → produced → promoted → completed`.
+Le broker écrit `transaction_promoted { runKey, transactionId, commitSha }` et
+inscrit `runKey` dans un trailer du commit.
+
+| État observé à la reprise | Action |
+|---|---|
+| `leased` sans `dispatched` | Redispatch autorisé, nouveau bail. |
+| `dispatched` sans acquittement | `outcome_unknown`. Chercher un commit portant ce `runKey`. Trouvé : réconcilier comme `promoted`. Absent : Run terminal `execution = outcome_unknown`, redispatch possible sous un nouveau `runKey` seulement si les entrées sont inchangées. |
+| `produced` sans `promoted` | Chercher un commit portant ce `runKey`. Trouvé : émettre `transaction_promoted` puis `run_completed`. Absent : jeter le staging, Run terminal `transaction = none`, code `promotion_lost`. |
+| `promoted` sans `completed` | Ne jamais invoquer `agy`. Compléter depuis le commit. |
+| état terminal | Retourner le résultat enregistré. |
+
+La ligne `produced` sans `promoted` ferme la fenêtre relevée sur la révision 2.
+
+### 6.3 Écriture concurrente
+
+Writer unique par mission, verrou exclusif système tenu sur la séquence
+complète lecture de tête, calcul de hash, append, `fsync`, mise à jour de tête.
+Le verrou n'est jamais tenu pendant une invocation `agy` : le parallélisme réel
+des Runs est donc préservé.
+
+À la reprise, une dernière ligne partielle échouant à la vérification de hash
+est tronquée ; toute incohérence ailleurs arrête la mission.
+
+`parallel()` ne convertit en `RunResult` que les échecs de Run. Corruption de
+journal, échec de verrou, époque périmée ou impossibilité de persister un
+événement autoritatif arrêtent la mission.
+
+## 7. Oracle
+
+### 7.1 Natures
+
+- `transactional` : broker plus gates, pour les Experts qui écrivent.
+- `artifact` : gates sur les artefacts produits, dans un worktree en lecture seule, pour les Experts read-only.
+- `journal` : gates sur le journal lui-même, réservées aux critères de mission, notamment la couverture.
+
+### 7.2 Classes de gates et force sémantique
+
+Chaque entrée du registre déclare une classe :
+
+| Classe | Ce qu'elle établit |
+|---|---|
+| `structural` | Forme : schéma, sections présentes, non-vacuité. |
+| `provenance` | Traçabilité : chaque chemin cité existe, chaque plage de lignes citée contient le symbole revendiqué, chaque entrée utilisée figure au manifeste. |
+| `semantic` | Contenu : test référencé présent et rouge avant / vert après, arbitre indépendant à critères cachés, propriété vérifiable du résultat. |
+| `coverage` | Composition de la mission, évaluée sur le journal. |
+
+**Règle de force, refusée au chargement si violée :** tout Expert `readOnly`
+doit porter au moins un critère de classe `semantic` ou `provenance`. Un
+contrat purement `structural` est interdit.
+
+**Calibration adverse, obligatoire.** Le catalogue livre un jeu de fixtures
+connues comme superficielles. Une gate qui approuve une fixture superficielle
+est refusée au chargement. C'est le seul mécanisme qui distingue « au moins un
+critère » de « un critère adéquat ».
+
+Les gates de comptage — nombre de citations, nombre de sections — ne peuvent
+pas être de classe `semantic` : elles récompensent le remplissage.
+
+### 7.3 Résultat par critère
+
+```
+CriterionResult { id, gateId, gateClass, outcome: "satisfied" | "unsatisfied" | "inconclusive" | "not_applicable", observation }
+```
+
+`Verdict.outcome = "approved"` seulement si tous les critères sont
+`satisfied`. Un `inconclusive` donne `Verdict.outcome = "inconclusive"`.
+
+### 7.4 Échelle d'arbitrage
+
+1. gate déterministe — seule autorité pouvant prononcer `approved` ;
+2. Expert arbitre indépendant, read-only, classe de modèle différente, critères non communiqués au script — peut seulement dégrader ou marquer `inconclusive` ;
+3. humain nommé — peut surcharger ; décision journalisée avec son identité.
+
+### 7.5 Interdits d'oracle
+
+Approbation vide interdite : un Expert sans critère ne peut pas atteindre
+`succeeded`. `mission_completed` exige un `mission_verdict` contre
+`MissionBundle.missionAcceptance`. Le scheduler ne peut pas l'émettre seul.
+
+## 8. Versions résolues par Run
+
+`run_started` enregistre et `RunResult` reporte : `resolvedModelId`,
+`resolverTableVersion`, `expertId`, `expertDigest`, `gateRegistryDigest`,
+`runtimeVersion`, `agyVersion`.
+
+À la reprise, une résolution divergente arrête la mission au lieu de
+substituer.
+
+## 9. Modèle de statuts
+
+```
+execution:   dispatch_refused | dispatched | produced | timeout | crashed | cancelled | outcome_unknown
+transaction: none | staged | rejected | promoted | conflict | promotion_lost
+evaluation:  not_evaluated | approved | rejected | inconclusive | needs_adjudication | not_applicable
+reasonCode:  string
+criteria:    CriterionResult[]
+```
+
+Combinaisons légales, exhaustives :
+
+| `execution` | `transaction` autorisées | `evaluation` autorisées |
+|---|---|---|
+| `dispatch_refused` | `none` | `not_evaluated` |
+| `dispatched` | `none` | `not_evaluated` |
+| `produced` | toutes | toutes |
+| `timeout`, `crashed`, `cancelled` | `none`, `promotion_lost` | `not_evaluated` |
+| `outcome_unknown` | `none`, `promoted`, `promotion_lost` | `not_evaluated`, `approved` |
+
+Toute autre combinaison est refusée à l'append.
+
+Étiquette dérivée : `succeeded` si et seulement si `execution = produced` **et**
+`evaluation = approved` **et** `transaction ∈ { none, promoted }`.
+
+Précédence : `execution`, puis `transaction`, puis `evaluation`. La
+satisfaction partielle est portée par `criteria[]`, jamais par un statut
+global. `needs_adjudication` est un état d'`evaluation`, pas un statut global.
+
+## 10. Contrats de données
+
+Hashes SHA-256 hexadécimaux minuscules sur 64 caractères. Horodatages ISO-8601
+UTC. Tout champ non listé est refusé au parsing. `RunInput` porte
+`contractVersion: 1`, espace de nommage indépendant du `schemaVersion` du
+graphe hérité.
+
+```
+RunInput {
+  contractVersion: 1
+  missionId, runId, runKey, leaseId, epoch: string
+  parentRunId: string | null
+  expertId, taskKind, objective: string
+  inputs: ArtifactRef[]
+  messages: Message[]
+  resolved: { modelId, resolverTableVersion, expertDigest, gateRegistryDigest, runtimeVersion, agyVersion }
+}
+
+RunResult {
+  runKey: string
+  execution, transaction, evaluation, reasonCode: string
+  criteria: CriterionResult[]
+  outputs: ArtifactRef[]
+  messages: Message[]
+  verdict: Verdict | null
+  usage: { inputTokens, outputTokens, wallClockMs }
+}
+
+ArtifactRef { id, kind, path, sha256, bytes, producedByRunKey, inputHashes: string[] }
+
+Message { role: "objective" | "finding" | "clarification" | "review", from: string, text: string }
+```
+
+`scope`, `acceptance`, `artifacts` et `maxDiff` sont absents de `RunInput` : le
+runtime les résout et les transmet directement au broker et à l'oracle.
+
+`Message.text` est plafonné à 4 096 octets UTF-8 ; au-delà, un `ArtifactRef`
+est obligatoire.
+
+`ArtifactRef.inputHashes` porte les hashes des entrées ayant produit
+l'artefact. Un artefact dont une entrée a changé devient `stale` et ne satisfait
+plus aucun critère.
+
+## 11. API d'orchestration
+
+```
+runExpert(expertId, taskKind, { objective, inputs, messages }): Promise<RunResult>
+parallel(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]>
+pipeline(items, ...stages): Promise<RunResult[]>
+```
+
+`runExpert()` : débite un bail, écrit `lease_issued`, `dispatch_intent` puis
+`run_started` sous verrou, invoque `agy` hors verrou, écrit les événements
+terminaux sous verrou. Aucune primitive ne permet de marquer un Run réussi.
+
+## 12. Journal et autorité de signature
+
+| Événement | Autorité | Charge utile |
+|---|---|---|
+| `mission_started` | scheduler | `missionId`, `missionHash`, limites |
+| `mission_epoch_opened` | scheduler | `epoch`, `ownerId` |
+| `lease_issued` | scheduler | `Lease` |
+| `dispatch_intent` | scheduler | `runKey`, `leaseId`, `epoch` |
+| `run_started` | scheduler | `runKey`, `expertId`, `resolved`, `inputDigest` |
+| `artifact_recorded` | broker | `ArtifactRef` |
+| `transaction_promoted` | broker | `runKey`, `transactionId`, `commitSha` |
+| `gate_evaluated` | oracle | `CriterionResult` |
+| `run_completed` | broker ou oracle | axes de statut, hash de `RunResult` |
+| `adjudicated` | humain | identité, décision, motif |
+| `mission_halted` | scheduler | code de raison |
+| `mission_completed` | scheduler | `mission_verdict` |
+
+**Custody de clé.** L'autorité de signature charge sa clé privée depuis un
+magasin protégé par l'OS, hors workspace : DPAPI sous Windows, fichier à ACL
+restreinte ailleurs. Elle ne génère plus de paire éphémère à chaque démarrage,
+contrairement à l'implémentation actuelle
+([`src/ledger/server.ts:102`](../../src/ledger/server.ts)). Au redémarrage,
+elle relit la tête épinglée et reprend. Si l'autorité est indisponible, la
+mission s'arrête ; elle ne dégrade jamais vers un journal non signé.
+
+## 13. Catalogue d'experts
+
+```
+id, description: string
+tools: { allow: string[], deny: string[] }
+modelClass: "fast" | "balanced" | "frontier"
+effort: "low" | "medium" | "high"
+readOnly: boolean
+tasks: { kind, scope: string[], artifacts: string[],
+         maxDiff: { files, lines },
+         acceptance: { id, description, gateId }[] }[]
+shallowFixtures: string[]
+```
+
+`effort` est limité à `low | medium | high` : `xhigh` n'existe pas dans
+`agy --help` sur la version installée.
+
+Experts initiaux, aucun autre sans amendement : `oma-orchestrator`,
+`oma-planner`, `oma-explorer`, `oma-executor`, `oma-reviewer`, `oma-verifier`.
+
+Contrat de dispatch normatif :
+
+```
+agy -p <promptEnveloppe> --agent <expertId> --model <resolvedModelId>
+    --effort <effort> --output-format stream-json --json-schema <resultSchema>
+    --print-timeout <ms>
+```
+
+## 14. Interdits explicites
+
+1. Aucune reprise automatique après création de processus.
+2. Aucune réutilisation de bail.
+3. Aucun `--continue` ni reprise de conversation.
+4. Aucun `succeeded` sans verdict d'oracle journalisé.
+5. Aucun `mission_completed` sans `mission_verdict`.
+6. Aucun contenu d'artefact dans le journal ni dans `Message.text` au-delà de 4 096 octets.
+7. Aucun critère ni `gateId` fourni par le script.
+8. Aucun Expert `readOnly` sans critère `semantic` ou `provenance`.
+9. Aucune gate de comptage de classe `semantic`.
+10. Aucune gate approuvant une fixture superficielle.
+11. Aucun événement portant une époque périmée.
+12. Aucun identifiant de modèle hors table de résolution.
+13. Aucune écriture agent hors `propose_change`.
+14. Aucun journal non signé.
+15. Aucun champ ajouté aux schémas §10 sans amendement.
+16. Aucune revendication de performance sans le protocole §16.
+
+## 15. Critères d'acceptation
+
+1. Deux Runs parallèles se chevauchent temporellement, prouvé par des intervalles `run_started`/`run_completed` sécants.
+2. Un fan-in consomme les artefacts amont, prouvé par `inputHashes` correspondant aux `sha256` produits.
+3. Un Run dont l'agent déclare la réussite sans verdict est journalisé non-succès.
+4. Une opération hors `scope` donne `transaction = rejected` sans exécuter de gate.
+5. Un diff dépassant `maxDiff` donne `transaction = rejected`.
+6. Une gate en échec donne `evaluation = rejected` et ne promeut rien.
+7. Un Expert read-only obtient `approved` via gates `artifact` ; un artefact vide, ou citant un chemin inexistant, obtient `rejected`.
+8. Un catalogue déclarant un Expert `readOnly` sans critère `semantic` ni `provenance` est refusé au chargement.
+9. Une gate approuvant une fixture superficielle est refusée au chargement.
+10. Un script fournissant `acceptance` ou `gateId` est refusé avant exécution.
+11. Un script utilisant `require`, `process`, `constructor`, `__proto__` ou `Date.now()` est refusé avant exécution.
+12. Un Expert référençant une entrée absente du manifeste donne `rejected`, code `unprovenanced_input`.
+13. Un `objective` contredisant le bloc contrat ne modifie pas le périmètre appliqué.
+14. Deux exécutions du même script avec les mêmes entrées produisent les mêmes `runKey`.
+15. Un branchement dépendant d'un résultat amont différent produit un `runKey` différent.
+16. Une boucle épuisant `maxAttemptsPerPath` s'arrête sans nouveau Run.
+17. Crash après `dispatch_intent` avant `spawn` : reprise redispatche avec un nouveau bail.
+18. Crash après `spawn` sans acquittement : reprise réconcilie par `runKey`, aucune mutation dupliquée.
+19. Crash après commit avant `transaction_promoted` : reprise émet `transaction_promoted` puis `run_completed`, sans invoquer `agy`.
+20. Crash après `transaction_promoted` avant `run_completed` : reprise complète depuis le commit.
+21. Crash pendant un append : la dernière ligne partielle est tronquée, la chaîne reste vérifiable.
+22. Un second processus de reprise incrémente l'époque ; les événements de l'ancien propriétaire sont refusés.
+23. Une combinaison d'axes illégale est refusée à l'append.
+24. Une reprise dont la résolution de modèle diffère arrête la mission.
+25. `mission_completed` est impossible sans `mission_verdict`.
+26. Une mission dont le script a omis le reviewer échoue sur son critère `coverage`.
+27. Une tête de journal réécrite est détectée par la signature épinglée.
+28. Un redémarrage de l'autorité de signature reprend la même identité de clé et accepte de nouvelles preuves.
+29. Un artefact dont une entrée a changé devient `stale` et ne satisfait plus son critère.
+
+## 16. Protocole de fiabilité longue
+
+Les critères §15 prouvent la correction, pas la fiabilité longue. Celle-ci
+exige :
+
+- mission d'au moins 40 Runs, répétée au minimum 10 fois ;
+- SLO déclaré avant exécution : taux de missions atteignant `mission_verdict approved` sans intervention, taux de mutation dupliquée nul, temps de reprise après faute injectée sous seuil ;
+- injection de fautes à chaque frontière : bail, `dispatch_intent`, `spawn`, acquittement, production, promotion, append, mise à jour de tête, autorité de signature ;
+- erreurs de transport transitoires, limitations de débit, épuisement de quota ;
+- mesure de croissance du journal, latence de rejeu, rétention d'artefacts ;
+- comparaison contrôlée contre Antigravity nu, **avec gel de** `resolvedModelId`, effort, prompts, budgets, permissions, commit initial et environnement, sur le même jeu de tâches ;
+- jeu de tâches adverses ciblant l'analyse superficielle et les fichiers pertinents omis, avec tests sémantiques cachés, invisibles du script comme des Experts.
+
+## 17. Migration et bascule
+
+- `.oma/graph/**` conservé ; une commande de vérification héritée rejoue sa chaîne et produit un rapport.
+- Aucune mission héritée active n'est migrée : elle est terminée sur le chemin hérité ou abandonnée explicitement, jamais transposée.
+- Nouveaux espaces versionnés : `.oma/v2/missions/<missionId>/`.
+- `src/broker`, `src/oracle` et `src/ledger` conservés ; `src/ledger` fournit la signature de tête après correction de la custody de clé.
+- **Déclencheurs de rollback**, tout dépassement ramène au chemin hérité : taux de mutation dupliquée non nul, mission impossible à reprendre, autorité de signature indisponible plus d'une fois par run long, régression du SLO sous la baseline.
+- **Condition de bascule** : squelette exécutable passant les 29 critères §15, plus une comparaison contrôlée §16 favorable. Jusque-là ADR-001 reste en vigueur et le chemin hérité reste exécutable.
+- Preuve post-bascule : les 10 missions longues rejouables depuis leur journal.
+- Aucune réutilisation de `schemaVersion 2` : `RunInput` porte `contractVersion: 1`.
+
+Cette condition de bascule est la différence avec les deux bascules
+précédentes, décidées avant toute preuve d'exécution.
+
+## 18. Non décidé
+
+1. Table de résolution `modelClass` vers modèles Gemini : noms, ordre de repli, politique de quota.
+2. Politique de rétention de `.oma/v2/missions/`.
+3. Ancrage du registre de gates et sort de `OMA_GATES_PATH`.
+4. Mécanisme d'attente d'une clarification humaine en cours de mission.
+5. Valeurs numériques du SLO §16.
+6. Contenu initial du jeu de fixtures superficielles par Expert.

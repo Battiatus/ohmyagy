@@ -107,7 +107,7 @@ function passingGate() {
   return {
     id: "pass",
     program: process.execPath,
-    args: ["-e", "process.stdout.write('ok')"],
+    args: ["-e", "1"],
     timeoutMs: 10_000,
   };
 }

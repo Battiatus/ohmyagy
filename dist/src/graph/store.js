@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { canonicalJson, hashJson, sha256 } from "../control/canonical.js";
+import { canonicalJson, hashJson, sha256 } from "../ledger/canonical.js";
+import { resolveGraphGates } from "./gate-registry.js";
 import { parseExecutionGraph, parseGraphEvent } from "./model.js";
 import { assertTransitionAllowed, projectGraph } from "./kernel.js";
 export const GRAPH_GENESIS_HASH = "0".repeat(64);
@@ -19,10 +20,31 @@ export function graphPaths(root) {
 export function loadGraphRuntime(root) {
     const paths = graphPaths(root);
     const raw = JSON.parse(readFileSync(paths.definition, "utf8"));
-    return { paths, graph: parseExecutionGraph(raw), graphHash: hashJson(raw) };
+    const graph = parseExecutionGraph(raw);
+    try {
+        return {
+            paths,
+            graph,
+            graphHash: hashJson(raw),
+            resolvedGates: resolveGraphGates(graph, paths.root),
+        };
+    }
+    catch (error) {
+        return {
+            paths,
+            graph,
+            graphHash: hashJson(raw),
+            resolvedGates: new Map(),
+            gateResolutionError: messageOf(error),
+        };
+    }
 }
 export function initializeGraphStore(root) {
     const runtime = loadGraphRuntime(root);
+    const runtimeErrors = graphRuntimeErrors(runtime);
+    if (runtimeErrors.length > 0) {
+        throw new Error(`Cannot initialize invalid graph store: ${runtimeErrors.join("; ")}`);
+    }
     if (existsSync(runtime.paths.events) || existsSync(runtime.paths.head)) {
         throw new Error("Graph event store is already initialized");
     }
@@ -32,10 +54,11 @@ export function initializeGraphStore(root) {
     return runtime;
 }
 export function verifyGraphStore(runtime) {
+    const errors = graphRuntimeErrors(runtime);
     if (!existsSync(runtime.paths.events) || !existsSync(runtime.paths.head)) {
         return {
             valid: false,
-            errors: ["Graph event store is not initialized"],
+            errors: [...errors, "Graph event store is not initialized"],
             events: [],
             headHash: GRAPH_GENESIS_HASH,
         };
@@ -44,7 +67,6 @@ export function verifyGraphStore(runtime) {
         .split(/\r?\n/u)
         .filter((line) => line.trim().length > 0);
     const events = [];
-    const errors = [];
     let previousHash = GRAPH_GENESIS_HASH;
     for (let index = 0; index < lines.length; index += 1) {
         try {
@@ -53,9 +75,35 @@ export function verifyGraphStore(runtime) {
                 errors.push(`Sequence mismatch at event ${index + 1}`);
             if (event.previousHash !== previousHash)
                 errors.push(`Previous hash mismatch at event ${index + 1}`);
-            if (event.graphId !== runtime.graph.graphId ||
-                event.graphRevision !== runtime.graph.revision ||
-                event.graphHash !== runtime.graphHash) {
+            if (event.graphId !== runtime.graph.graphId) {
+                errors.push(`Graph identity mismatch at event ${index + 1}`);
+            }
+            else if (event.graphRevision === runtime.graph.revision) {
+                if (event.graphHash !== runtime.graphHash) {
+                    errors.push(`Graph identity mismatch at event ${index + 1}`);
+                }
+            }
+            else if (event.graphRevision < runtime.graph.revision) {
+                const revPath = join(runtime.paths.graphDir, "revisions", `rev_${event.graphRevision}.json`);
+                const paddedRevPath = join(runtime.paths.graphDir, "revisions", `rev_${String(event.graphRevision).padStart(3, "0")}.json`);
+                const targetRevPath = existsSync(revPath) ? revPath : existsSync(paddedRevPath) ? paddedRevPath : undefined;
+                if (!targetRevPath) {
+                    errors.push(`Graph identity mismatch at event ${index + 1}`);
+                }
+                else {
+                    try {
+                        const revRaw = JSON.parse(readFileSync(targetRevPath, "utf8"));
+                        const revHash = hashJson(revRaw);
+                        if (event.graphHash !== revHash) {
+                            errors.push(`Graph identity mismatch at event ${index + 1}`);
+                        }
+                    }
+                    catch {
+                        errors.push(`Graph identity mismatch at event ${index + 1}`);
+                    }
+                }
+            }
+            else {
                 errors.push(`Graph identity mismatch at event ${index + 1}`);
             }
             const { eventHash, ...unsigned } = event;
@@ -147,4 +195,11 @@ function withGraphLock(paths, operation) {
 }
 function messageOf(error) {
     return error instanceof Error ? error.message : String(error);
+}
+function graphRuntimeErrors(runtime) {
+    const errors = [];
+    if (runtime.gateResolutionError) {
+        errors.push(`Gate registry resolution failed: ${runtime.gateResolutionError}`);
+    }
+    return errors;
 }

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { hashJson, sha256 } from "../control/canonical.js";
+import { hashJson, sha256 } from "../ledger/canonical.js";
 import { assertStagedTransactionState, discardStagedTransaction, } from "../broker/staging.js";
 export class OracleError extends Error {
     constructor(message) {

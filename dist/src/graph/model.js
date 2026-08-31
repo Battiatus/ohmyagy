@@ -1,4 +1,4 @@
-import { isRecord } from "../control/model.js";
+import { isRecord } from "../ledger/canonical.js";
 const authorityByKind = {
     agent: "broker",
     broker: "broker",
@@ -7,9 +7,10 @@ const authorityByKind = {
     human: "human",
 };
 export function parseExecutionGraph(value) {
-    if (!isRecord(value) || value.schemaVersion !== 1) {
+    if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2)) {
         throw new Error("Unsupported execution graph schema");
     }
+    const schemaVersion = value.schemaVersion;
     assertExactKeys(value, ["schemaVersion", "graphId", "revision", "schedulerAuthorityId", "nodes", "edges"], "graph");
     if (!Number.isInteger(value.revision) || Number(value.revision) < 1) {
         throw new Error("Graph revision must be a positive integer");
@@ -17,7 +18,7 @@ export function parseExecutionGraph(value) {
     if (!Array.isArray(value.nodes) || value.nodes.length === 0 || !Array.isArray(value.edges)) {
         throw new Error("Execution graph requires nodes and edges arrays");
     }
-    const nodes = value.nodes.map(parseNode);
+    const nodes = value.nodes.map((node, index) => parseNode(node, index, schemaVersion));
     const edges = value.edges.map(parseEdge);
     assertUnique(nodes.map((node) => node.id), "node");
     assertUnique(edges.map((edge) => edge.id), "edge");
@@ -32,7 +33,7 @@ export function parseExecutionGraph(value) {
     }
     assertAcyclic(nodes, edges);
     return {
-        schemaVersion: 1,
+        schemaVersion,
         graphId: requireString(value, "graphId"),
         revision: Number(value.revision),
         schedulerAuthorityId: requireString(value, "schedulerAuthorityId"),
@@ -40,9 +41,10 @@ export function parseExecutionGraph(value) {
         edges,
     };
 }
-function parseNode(value, index) {
+function parseNode(value, index, schemaVersion) {
     if (!isRecord(value))
         throw new Error(`Invalid graph node at index ${index}`);
+    const contractFields = ["scope", "acceptance", "artifacts", "maxDiff"];
     assertExactKeys(value, [
         "id",
         "title",
@@ -51,7 +53,8 @@ function parseNode(value, index) {
         "completionAuthority",
         "completionAuthorityId",
         "executor",
-    ], `node[${index}]`, ["executor"]);
+        ...(schemaVersion === 2 ? contractFields : []),
+    ], `node[${index}]`, ["executor", ...(schemaVersion === 2 ? contractFields : [])]);
     const kind = requireEnum(value, "kind", ["agent", "broker", "gate", "join", "human"]);
     const completionAuthority = requireEnum(value, "completionAuthority", [
         "broker",
@@ -63,6 +66,10 @@ function parseNode(value, index) {
         throw new Error(`Node ${requireString(value, "id")} requires ${authorityByKind[kind]} authority`);
     }
     let executor;
+    let scope;
+    let acceptance;
+    let artifacts;
+    let maxDiff;
     if (kind === "agent") {
         if (!isRecord(value.executor))
             throw new Error(`Agent node ${requireString(value, "id")} requires executor`);
@@ -71,9 +78,27 @@ function parseNode(value, index) {
             adapter: requireString(value.executor, "adapter"),
             persona: requireString(value.executor, "persona"),
         };
+        if (schemaVersion === 2) {
+            if ("scope" in value)
+                scope = parseRepoPaths(value.scope, `node[${index}].scope`);
+            if ("acceptance" in value) {
+                acceptance = parseNodeAcceptance(value.acceptance, `node[${index}].acceptance`);
+            }
+            if ("artifacts" in value) {
+                artifacts = parseRepoPaths(value.artifacts, `node[${index}].artifacts`);
+            }
+            if ("maxDiff" in value)
+                maxDiff = parseNodeMaxDiff(value.maxDiff, `node[${index}].maxDiff`);
+        }
     }
     else if (value.executor !== undefined) {
         throw new Error(`Only agent nodes may define an executor`);
+    }
+    if (kind !== "agent") {
+        for (const field of ["scope", "acceptance", "artifacts", "maxDiff"]) {
+            if (field in value)
+                throw new Error(`Only agent nodes may define ${field}`);
+        }
     }
     return {
         id: requireString(value, "id"),
@@ -83,6 +108,62 @@ function parseNode(value, index) {
         completionAuthority,
         completionAuthorityId: requireString(value, "completionAuthorityId"),
         ...(executor ? { executor } : {}),
+        ...(scope ? { scope } : {}),
+        ...(acceptance ? { acceptance } : {}),
+        ...(artifacts ? { artifacts } : {}),
+        ...(maxDiff ? { maxDiff } : {}),
+    };
+}
+function parseRepoPaths(value, label) {
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`${label} must be a non-empty array`);
+    }
+    return value.map((entry, index) => {
+        if (typeof entry !== "string" || entry.length === 0) {
+            throw new Error(`Expected non-empty ${label}[${index}]`);
+        }
+        if (entry.includes("\0"))
+            throw new Error(`${label}[${index}] must not contain NUL bytes`);
+        if (entry.includes("\\"))
+            throw new Error(`${label}[${index}] must use forward slashes`);
+        if (entry.startsWith("/") || /^[A-Za-z]:/u.test(entry)) {
+            throw new Error(`${label}[${index}] must be repo-relative`);
+        }
+        if (entry.split("/").includes("..")) {
+            throw new Error(`${label}[${index}] must not contain .. segments`);
+        }
+        return entry;
+    });
+}
+function parseNodeAcceptance(value, label) {
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`${label} must be a non-empty array`);
+    }
+    const acceptance = value.map((entry, index) => {
+        const entryLabel = `${label}[${index}]`;
+        if (!isRecord(entry))
+            throw new Error(`Invalid ${entryLabel}`);
+        assertExactKeys(entry, ["id", "description", "gateId"], entryLabel);
+        const gateId = requireString(entry, "gateId");
+        if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(gateId)) {
+            throw new Error(`${entryLabel}.gateId must match /^[a-z0-9][a-z0-9-]{0,63}$/`);
+        }
+        return {
+            id: requireString(entry, "id"),
+            description: requireString(entry, "description"),
+            gateId,
+        };
+    });
+    assertUnique(acceptance.map((entry) => entry.id), "acceptance");
+    return acceptance;
+}
+function parseNodeMaxDiff(value, label) {
+    if (!isRecord(value))
+        throw new Error(`Invalid ${label}`);
+    assertExactKeys(value, ["files", "lines"], label);
+    return {
+        files: requirePositiveInteger(value, "files"),
+        lines: requirePositiveInteger(value, "lines"),
     };
 }
 function parseEdge(value, index) {

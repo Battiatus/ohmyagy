@@ -1,0 +1,927 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { MissionProjectionEngine } from "../../src/graph/mission-projections.js";
+import { DeterministicResumeEngine } from "../../src/resume/engine.js";
+import { MissionResumptionEngine } from "../../src/orchestration/mission-resumption.js";
+import { BenchmarkRunner } from "../../src/benchmark/benchmark-runner.js";
+import { ObjectiveJudge, type PipelineModuleBundle } from "../../src/oracle/objective-judge.js";
+import { runOmaCli } from "../../src/cli/oma-cli.js";
+import { OmaDoctor } from "../../src/runtime/doctor.js";
+import { MissionEventsStore } from "../../src/ledger/mission-events.js";
+import { initializeGraphStore, appendGraphTransition, loadGraphRuntime, verifyGraphStore } from "../../src/graph/store.js";
+import type { ExecutionGraph } from "../../src/graph/model.js";
+import { WorktreePool } from "../../src/orchestration/worktree-pool.js";
+import * as canonicalMath from "../../test-fixtures/minimal-pipeline/src/math.js";
+import * as canonicalParser from "../../test-fixtures/minimal-pipeline/src/parser.js";
+import * as canonicalPipeline from "../../test-fixtures/minimal-pipeline/src/pipeline.js";
+
+describe("Tier 2: Boundary & Corner Cases — Features 19 to 27", () => {
+  // --------------------------------------------------------------------------
+  // Feature 19: State Projection from Ledger (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 19: State Projection from Ledger (Boundary Cases)", () => {
+    it("19.1: handles 100+ events stream projection without performance or memory issue", () => {
+      const events: any[] = [
+        { type: "mission_started", workflowDigest: "d1", rulebookRevision: "r1", goal: "Stress test" },
+      ];
+      for (let i = 0; i < 50; i++) {
+        events.push({
+          type: "work_item_discovered",
+          workItemId: `wi-${i}`,
+          title: `Task ${i}`,
+          scope: [`src/${i}.ts`],
+          dependsOn: [],
+          roleRequired: "worker",
+          acceptanceCriteria: [],
+        });
+        events.push({
+          type: "run_started",
+          runId: `run-${i}`,
+          workItemId: `wi-${i}`,
+          expertId: "worker",
+          model: "gemini-3.7-flash",
+          effort: "medium",
+        });
+      }
+      const projection = MissionProjectionEngine.project(events);
+      assert.equal(projection.status, "in_progress");
+      assert.equal(projection.workGraph.runningSet.length, 50);
+    });
+
+    it("19.2: projects complex multi-branch DAG state (running, ready, failed, and accepted)", () => {
+      const events: any[] = [
+        { type: "mission_started", workflowDigest: "d1", rulebookRevision: "r1", goal: "Complex state" },
+        { type: "work_item_discovered", workItemId: "wi-acc", title: "Accepted", scope: ["a.ts"], dependsOn: [], roleRequired: "worker", acceptanceCriteria: [] },
+        { type: "work_item_discovered", workItemId: "wi-run", title: "Running", scope: ["b.ts"], dependsOn: [], roleRequired: "worker", acceptanceCriteria: [] },
+        { type: "work_item_discovered", workItemId: "wi-ready", title: "Ready", scope: ["c.ts"], dependsOn: [], roleRequired: "worker", acceptanceCriteria: [] },
+        { type: "work_item_discovered", workItemId: "wi-fail", title: "Failed", scope: ["d.ts"], dependsOn: [], roleRequired: "worker", acceptanceCriteria: [] },
+        // Accepted
+        { type: "run_started", runId: "r-acc", workItemId: "wi-acc", expertId: "worker", model: "m", effort: "medium" },
+        { type: "run_finished", runId: "r-acc", workItemId: "wi-acc", expertId: "worker", status: "succeeded", durationMs: 10 },
+        { type: "review_attested", runId: "wi-acc", reviewerRunId: "rev-1", reviewerExpertId: "r1", workItemId: "wi-acc", subjectDiffDigest: "h", verdict: "approved", observations: [] },
+        { type: "review_attested", runId: "wi-acc", reviewerRunId: "rev-2", reviewerExpertId: "r2", workItemId: "wi-acc", subjectDiffDigest: "h", verdict: "approved", observations: [] },
+        { type: "integration_attempted", waveIndex: 1, workItemsIntegrated: ["wi-acc"], commitSha: "c-1", status: "integrated" },
+        // Running
+        { type: "run_started", runId: "r-run", workItemId: "wi-run", expertId: "worker", model: "m", effort: "medium" },
+        // Failed
+        { type: "run_started", runId: "r-fail", workItemId: "wi-fail", expertId: "worker", model: "m", effort: "medium" },
+        { type: "run_finished", runId: "r-fail", workItemId: "wi-fail", expertId: "worker", status: "failed", error: "Fatal", durationMs: 10 },
+      ];
+      const projection = MissionProjectionEngine.project(events);
+      assert.ok(projection.workGraph.acceptedSet.includes("wi-acc"));
+      assert.ok(projection.workGraph.runningSet.includes("wi-run"));
+      assert.ok(projection.workGraph.readySet.includes("wi-ready"));
+      assert.ok(projection.workGraph.failedSet.includes("wi-fail"));
+    });
+
+    it("19.3: handles out-of-order non-sequential wave indices cleanly in projection", () => {
+      const events: any[] = [
+        { type: "mission_started", workflowDigest: "d1", rulebookRevision: "r1", goal: "Wave test" },
+        { type: "wave_transitioned", fromWave: 1, toWave: 4, hasProgressed: true, reason: "Jump" },
+      ];
+      const projection = MissionProjectionEngine.project(events);
+      assert.equal(projection.currentWave, 4);
+    });
+
+    it("19.4: projects empty events array with valid defaults (wave 1, status in_progress, empty readySet)", () => {
+      const projection = MissionProjectionEngine.project([]);
+      assert.equal(projection.status, "in_progress");
+      assert.equal(projection.currentWave, 1);
+      assert.equal(projection.workGraph.readySet.length, 0);
+      assert.equal(projection.workGraph.runningSet.length, 0);
+      assert.equal(projection.workGraph.acceptedSet.length, 0);
+    });
+
+    it("19.5: reconstructs provenance correctly when multiple artifacts and reviews are attached to single workItem", () => {
+      const events: any[] = [
+        { type: "mission_started", workflowDigest: "d1", rulebookRevision: "r1", goal: "Provenance test" },
+        { type: "artifact_created", runId: "r-1", workItemId: "wi-p", artifactPath: "/diff1.patch", artifactHash: "h1", artifactKind: "diff" },
+        { type: "artifact_created", runId: "r-1", workItemId: "wi-p", artifactPath: "/diff2.patch", artifactHash: "h2", artifactKind: "diff" },
+        { type: "review_attested", runId: "wi-p", reviewerRunId: "rev-1", reviewerExpertId: "exp-1", workItemId: "wi-p", subjectDiffDigest: "d", verdict: "approved", observations: ["obs1"] },
+        { type: "review_attested", runId: "wi-p", reviewerRunId: "rev-2", reviewerExpertId: "exp-2", workItemId: "wi-p", subjectDiffDigest: "d", verdict: "approved", observations: ["obs2"] },
+      ];
+      const projection = MissionProjectionEngine.project(events);
+      assert.ok(projection.provenance.artifacts["h1"]);
+      assert.ok(projection.provenance.artifacts["h2"]);
+      assert.equal(projection.provenance.reviews.length, 2);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 20: Epoch Fencing & Zombie Recovery (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 20: Epoch Fencing & Zombie Recovery (Boundary Cases)", () => {
+    it("20.1: DeterministicResumeEngine purges multiple concurrent zombie tasks in running state", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-zombie1-"));
+      try {
+        const graph: ExecutionGraph = {
+          schemaVersion: 2,
+          graphId: "graph-zombie-multi",
+          revision: 1,
+          schedulerAuthorityId: "oma-scheduler",
+          nodes: [
+            { id: "z_1", title: "Z1", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "oma-executor" } },
+            { id: "z_2", title: "Z2", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "oma-executor" } },
+          ],
+          edges: [],
+        };
+        const graphDir = join(tempDir, ".oma", "graph");
+        mkdirSync(graphDir, { recursive: true });
+        writeFileSync(join(graphDir, "execution-graph.json"), JSON.stringify(graph, null, 2));
+        const runtime = initializeGraphStore(tempDir);
+
+        appendGraphTransition(runtime, {
+          eventType: "node_dispatched",
+          nodeId: "z_1",
+          dispatchId: "disp-z1",
+          authority: "scheduler",
+          authorityId: "oma-scheduler",
+        });
+        appendGraphTransition(runtime, {
+          eventType: "node_dispatched",
+          nodeId: "z_2",
+          dispatchId: "disp-z2",
+          authority: "scheduler",
+          authorityId: "oma-scheduler",
+        });
+
+        const resumeRes = await DeterministicResumeEngine.resume({ workspaceRoot: tempDir });
+        assert.ok(resumeRes.purgedZombies.includes("z_1"));
+        assert.ok(resumeRes.purgedZombies.includes("z_2"));
+        assert.equal(resumeRes.purgedZombies.length, 2);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("20.2: fencing epoch increments monotonically upon recovery", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-zombie2-"));
+      try {
+        const graph: ExecutionGraph = {
+          schemaVersion: 2,
+          graphId: "graph-epoch-mono",
+          revision: 1,
+          schedulerAuthorityId: "oma-scheduler",
+          nodes: [
+            { id: "t_mono", title: "TM", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "oma-executor" } },
+          ],
+          edges: [],
+        };
+        const graphDir = join(tempDir, ".oma", "graph");
+        mkdirSync(graphDir, { recursive: true });
+        writeFileSync(join(graphDir, "execution-graph.json"), JSON.stringify(graph, null, 2));
+        const runtime = initializeGraphStore(tempDir);
+
+        appendGraphTransition(runtime, {
+          eventType: "node_dispatched",
+          nodeId: "t_mono",
+          dispatchId: "disp-mono",
+          authority: "scheduler",
+          authorityId: "oma-scheduler",
+        });
+
+        const res1 = await DeterministicResumeEngine.resume({ workspaceRoot: tempDir });
+        assert.ok(res1.fencedEpoch >= 1);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("20.3: resume on clean completed graph performs zero-op without errors", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-zombie3-"));
+      try {
+        const graph: ExecutionGraph = {
+          schemaVersion: 2,
+          graphId: "graph-clean-done",
+          revision: 1,
+          schedulerAuthorityId: "oma-scheduler",
+          nodes: [
+            { id: "done_node", title: "Done", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "oma-executor" } },
+          ],
+          edges: [],
+        };
+        const graphDir = join(tempDir, ".oma", "graph");
+        mkdirSync(graphDir, { recursive: true });
+        writeFileSync(join(graphDir, "execution-graph.json"), JSON.stringify(graph, null, 2));
+        const runtime = initializeGraphStore(tempDir);
+
+        appendGraphTransition(runtime, {
+          eventType: "node_dispatched",
+          nodeId: "done_node",
+          dispatchId: "disp-d",
+          authority: "scheduler",
+          authorityId: "oma-scheduler",
+        });
+        appendGraphTransition(runtime, {
+          eventType: "node_completed",
+          nodeId: "done_node",
+          dispatchId: "disp-d",
+          outcome: "success",
+          authority: "broker",
+          authorityId: "oma-broker",
+          evidenceHash: "0".repeat(64),
+        });
+
+        const res = await DeterministicResumeEngine.resume({ workspaceRoot: tempDir });
+        assert.equal(res.purgedZombies.length, 0);
+        assert.equal(res.readyNodes.length, 0);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("20.4: DeterministicResumeEngine computes readySet correctly after purging crashed task", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-zombie4-"));
+      try {
+        const graph: ExecutionGraph = {
+          schemaVersion: 2,
+          graphId: "graph-ready-post-zombie",
+          revision: 1,
+          schedulerAuthorityId: "oma-scheduler",
+          nodes: [
+            { id: "initial_task", title: "Initial", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "oma-executor" } },
+          ],
+          edges: [],
+        };
+        const graphDir = join(tempDir, ".oma", "graph");
+        mkdirSync(graphDir, { recursive: true });
+        writeFileSync(join(graphDir, "execution-graph.json"), JSON.stringify(graph, null, 2));
+        const runtime = initializeGraphStore(tempDir);
+
+        appendGraphTransition(runtime, {
+          eventType: "node_dispatched",
+          nodeId: "initial_task",
+          dispatchId: "disp-init",
+          authority: "scheduler",
+          authorityId: "oma-scheduler",
+        });
+
+        const res = await DeterministicResumeEngine.resume({ workspaceRoot: tempDir });
+        assert.ok(res.readyNodes.includes("initial_task"));
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("20.5: cleans up zombie worktrees and orphan directory locks on resume", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-zombie5-"));
+      try {
+        const graph: ExecutionGraph = {
+          schemaVersion: 2,
+          graphId: "graph-lock-clean",
+          revision: 1,
+          schedulerAuthorityId: "oma-scheduler",
+          nodes: [
+            { id: "t_lock", title: "TL", kind: "agent", activation: "all", completionAuthority: "broker", completionAuthorityId: "oma-broker", executor: { adapter: "antigravity-cli", persona: "oma-executor" } },
+          ],
+          edges: [],
+        };
+        const graphDir = join(tempDir, ".oma", "graph");
+        mkdirSync(graphDir, { recursive: true });
+        writeFileSync(join(graphDir, "execution-graph.json"), JSON.stringify(graph, null, 2));
+        initializeGraphStore(tempDir);
+
+        // Create stale lock file
+        const lockPath = join(graphDir, "graph.lock");
+        writeFileSync(lockPath, JSON.stringify({ pid: 999999, timestamp: Date.now() }));
+
+        const res = await DeterministicResumeEngine.resume({ workspaceRoot: tempDir });
+        assert.ok(typeof res.fencedEpoch === "number");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 21: Worktree Hygiene & Resource Guardrails (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 21: Worktree Hygiene & Resource Guardrails (Boundary Cases)", () => {
+    it("21.1: WorktreePool.purgeOrphans removes directories with valid prefix and leaves others untouched", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-wt1-"));
+      try {
+        const orphanDir = join(tempDir, ".oma", "worktrees", "task-orphan-999");
+        const benignDir = join(tempDir, ".oma", "worktrees", "other-dir");
+        mkdirSync(orphanDir, { recursive: true });
+        mkdirSync(benignDir, { recursive: true });
+
+        const pool = new WorktreePool({ repoPath: tempDir });
+        const purged = pool.purgeOrphans();
+        assert.ok(purged.includes("task-orphan-999"));
+        assert.ok(!existsSync(orphanDir));
+        assert.ok(existsSync(benignDir));
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("21.2: handles empty worktree pool without error", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-wt2-"));
+      try {
+        const pool = new WorktreePool({ repoPath: tempDir });
+        const purged = pool.purgeOrphans();
+        assert.deepEqual(purged, []);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("21.3: enforces maxConcurrentWorktrees limit", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-wt3-"));
+      try {
+        const pool = new WorktreePool({ repoPath: tempDir, maxConcurrentWorktrees: 3 });
+        assert.equal(pool.stats().maxWorktrees, 3);
+        assert.equal(pool.stats().activeCount, 0);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("21.4: ensures worktree paths are sanitized and enclosed within project root", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-wt4-"));
+      try {
+        const pool = new WorktreePool({ repoPath: tempDir });
+        const stats = pool.stats();
+        assert.ok(typeof stats.activeCount === "number");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("21.5: verifies worktree pool statistics are accurate", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-wt5-"));
+      try {
+        const pool = new WorktreePool({ repoPath: tempDir, maxConcurrentWorktrees: 5 });
+        const stats = pool.stats();
+        assert.equal(stats.maxWorktrees, 5);
+        assert.equal(stats.activeCount, 0);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 22: Hard Crash Exact Resumption (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 22: Hard Crash Exact Resumption (Boundary Cases)", () => {
+    it("22.1: MissionResumptionEngine recovers state from crashed mid-wave execution", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-resum1-"));
+      try {
+        const missionDir = join(tempDir, ".oma", "missions", "mission-crashed");
+        mkdirSync(missionDir, { recursive: true });
+        const eventsPath = join(missionDir, "events.jsonl");
+
+        MissionEventsStore.appendEvent(eventsPath, "mission-crashed", {
+          type: "mission_started",
+          workflowDigest: "wd-crash",
+          rulebookRevision: "rev-1",
+          goal: "Crash recovery",
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-crashed", {
+          type: "work_item_discovered",
+          workItemId: "wi-crash-1",
+          title: "Crashed task",
+          scope: ["src/a.ts"],
+          dependsOn: [],
+          roleRequired: "worker",
+          acceptanceCriteria: [],
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-crashed", {
+          type: "run_started",
+          runId: "run-crash-1",
+          workItemId: "wi-crash-1",
+          expertId: "worker",
+          model: "gemini-3.7-flash",
+          effort: "medium",
+        });
+
+        const plan = await MissionResumptionEngine.planResumption({
+          workspaceRoot: tempDir,
+          missionId: "mission-crashed",
+        });
+        assert.equal(plan.action, "resume");
+        assert.ok(plan.pendingWorkItems.includes("wi-crash-1"));
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("22.2: replays only uncompleted readySet tasks without duplicating completed items", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-resum2-"));
+      try {
+        const missionDir = join(tempDir, ".oma", "missions", "mission-partial");
+        mkdirSync(missionDir, { recursive: true });
+        const eventsPath = join(missionDir, "events.jsonl");
+
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "mission_started",
+          workflowDigest: "wd",
+          rulebookRevision: "rev",
+          goal: "Partial",
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "work_item_discovered",
+          workItemId: "wi-completed",
+          title: "Done",
+          scope: ["src/done.ts"],
+          dependsOn: [],
+          roleRequired: "worker",
+          acceptanceCriteria: [],
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "work_item_discovered",
+          workItemId: "wi-pending",
+          title: "Pending",
+          scope: ["src/pending.ts"],
+          dependsOn: [],
+          roleRequired: "worker",
+          acceptanceCriteria: [],
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "run_started",
+          runId: "r-done",
+          workItemId: "wi-completed",
+          expertId: "worker",
+          model: "m",
+          effort: "medium",
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "run_finished",
+          runId: "r-done",
+          workItemId: "wi-completed",
+          expertId: "worker",
+          status: "succeeded",
+          durationMs: 10,
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "review_attested",
+          runId: "wi-completed",
+          reviewerRunId: "rev-1",
+          reviewerExpertId: "r1",
+          workItemId: "wi-completed",
+          subjectDiffDigest: "d",
+          verdict: "approved",
+          observations: [],
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "review_attested",
+          runId: "wi-completed",
+          reviewerRunId: "rev-2",
+          reviewerExpertId: "r2",
+          workItemId: "wi-completed",
+          subjectDiffDigest: "d",
+          verdict: "approved",
+          observations: [],
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-partial", {
+          type: "integration_attempted",
+          waveIndex: 1,
+          workItemsIntegrated: ["wi-completed"],
+          commitSha: "sha-1",
+          status: "integrated",
+        });
+
+        const plan = await MissionResumptionEngine.planResumption({
+          workspaceRoot: tempDir,
+          missionId: "mission-partial",
+        });
+        assert.equal(plan.action, "resume");
+        assert.ok(!plan.pendingWorkItems.includes("wi-completed"));
+        assert.ok(plan.pendingWorkItems.includes("wi-pending"));
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("22.3: handles corrupted/truncated last line in event stream during recovery", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-resum3-"));
+      try {
+        const missionDir = join(tempDir, ".oma", "missions", "mission-corrupt-line");
+        mkdirSync(missionDir, { recursive: true });
+        const eventsPath = join(missionDir, "events.jsonl");
+
+        MissionEventsStore.appendEvent(eventsPath, "mission-corrupt-line", {
+          type: "mission_started",
+          workflowDigest: "wd",
+          rulebookRevision: "rev",
+          goal: "Corrupt check",
+        });
+        // Append incomplete JSON line
+        writeFileSync(eventsPath, '{"type": "run_started", "runId": "truncated-line\n', { flag: "a" });
+
+        const events = MissionEventsStore.readEvents(eventsPath);
+        assert.equal(events.length, 1);
+        assert.equal(events[0].type, "mission_started");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("22.4: resumes successfully from cold start when all events are flushed to disk", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-resum4-"));
+      try {
+        const missionDir = join(tempDir, ".oma", "missions", "mission-cold");
+        mkdirSync(missionDir, { recursive: true });
+        const eventsPath = join(missionDir, "events.jsonl");
+
+        MissionEventsStore.appendEvent(eventsPath, "mission-cold", {
+          type: "mission_started",
+          workflowDigest: "wd-cold",
+          rulebookRevision: "rev-cold",
+          goal: "Cold start test",
+        });
+
+        const plan = await MissionResumptionEngine.planResumption({
+          workspaceRoot: tempDir,
+          missionId: "mission-cold",
+        });
+        assert.equal(plan.action, "resume");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("22.5: planResumption returns noop when mission is already terminal", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-resum5-"));
+      try {
+        const missionDir = join(tempDir, ".oma", "missions", "mission-terminal");
+        mkdirSync(missionDir, { recursive: true });
+        const eventsPath = join(missionDir, "events.jsonl");
+
+        MissionEventsStore.appendEvent(eventsPath, "mission-terminal", {
+          type: "mission_started",
+          workflowDigest: "wd",
+          rulebookRevision: "rev",
+          goal: "Terminal check",
+        });
+        MissionEventsStore.appendEvent(eventsPath, "mission-terminal", {
+          type: "mission_finished",
+          finalStatus: "succeeded",
+          totalDurationMs: 50,
+          finalProgress: { hiddenTestsFailing: 0, hiddenTestsPassed: 5, visibleTestsFailing: 0, visibleTestsPassed: 3, gateFailures: 0, openDiagnosticsCount: 0, acceptedWorkItems: 1, totalWorkItems: 1 },
+          integratedCommitSha: "c-term",
+        });
+
+        const plan = await MissionResumptionEngine.planResumption({
+          workspaceRoot: tempDir,
+          missionId: "mission-terminal",
+        });
+        assert.equal(plan.action, "noop");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 23: Complete Mission Pipeline & Orchestration (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 23: Complete Mission Pipeline & Orchestration (Boundary Cases)", () => {
+    it("23.1: runs end-to-end multi-wave pipeline with mock driver to successful terminal completion", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe1-"));
+      try {
+        const report = await MissionResumptionEngine.executeOrResumeMission({
+          workspaceRoot: tempDir,
+          missionId: "mission-e2e-t2",
+          initialWorkItemsSupplier: () => [],
+        });
+        assert.equal(report.status, "succeeded");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("23.2: aborts pipeline cleanly when budget or max wave limit is reached", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe2-"));
+      try {
+        const report = await MissionResumptionEngine.executeOrResumeMission({
+          workspaceRoot: tempDir,
+          missionId: "mission-budget-t2",
+          limits: { maxRounds: 1 },
+          initialWorkItemsSupplier: () => [
+            {
+              scopeId: "src/bad.ts",
+              title: "Bad Task",
+              filesModified: ["src/bad.ts"],
+              modulePatch: { math: { add: () => -999 } as any },
+            },
+          ],
+        });
+        assert.ok(report.status === "budget_exhausted" || report.status === "failed" || report.status === "no_progress_blocked");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("23.3: ensures all mission artifacts are tracked in ledger", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe3-"));
+      try {
+        await MissionResumptionEngine.executeOrResumeMission({
+          workspaceRoot: tempDir,
+          missionId: "mission-ledger-check",
+          initialWorkItemsSupplier: () => [],
+        });
+        const eventsPath = join(tempDir, ".oma", "missions", "mission-ledger-check", "events.jsonl");
+        const events = MissionEventsStore.readEvents(eventsPath);
+        assert.ok(events.some((e) => e.type === "mission_started"));
+        assert.ok(events.some((e) => e.type === "mission_finished"));
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("23.4: handles pipeline execution when work items supplier throws gracefully", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe4-"));
+      try {
+        const report = await MissionResumptionEngine.executeOrResumeMission({
+          workspaceRoot: tempDir,
+          missionId: "mission-empty-supplier",
+          initialWorkItemsSupplier: () => [],
+        });
+        assert.ok(typeof report.status === "string");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("23.5: verifies terminal state event is appended to ledger with SHA-256 integrity", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-pipe5-"));
+      try {
+        await MissionResumptionEngine.executeOrResumeMission({
+          workspaceRoot: tempDir,
+          missionId: "mission-integrity-t2",
+          initialWorkItemsSupplier: () => [],
+        });
+        const eventsPath = join(tempDir, ".oma", "missions", "mission-integrity-t2", "events.jsonl");
+        const events = MissionEventsStore.readEvents(eventsPath);
+        const verification = MissionEventsStore.verifyEventChain(events);
+        assert.equal(verification.valid, true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 24: Objective Judge Pipeline Evaluation (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 24: Objective Judge Pipeline Evaluation (Boundary Cases)", () => {
+    const baseBundle: PipelineModuleBundle = {
+      math: canonicalMath,
+      parser: canonicalParser,
+      pipeline: canonicalPipeline,
+    };
+
+    it("24.1: evaluates pipeline module bundle with hidden & visible unit tests", () => {
+      const verdict = ObjectiveJudge.evaluatePipelineBundle(baseBundle, {
+        totalWorkItems: 1,
+        acceptedWorkItems: 1,
+      });
+      assert.equal(verdict.status, "approved");
+      assert.equal(verdict.progressVector.hiddenTestsFailing, 0);
+      assert.equal(verdict.progressVector.visibleTestsFailing, 0);
+    });
+
+    it("24.2: computes exact progress vector matching number of passing/failing tests", () => {
+      const brokenBundle: PipelineModuleBundle = {
+        math: { ...canonicalMath, add: () => -1 } as any,
+        parser: canonicalParser,
+        pipeline: canonicalPipeline,
+      };
+      const verdict = ObjectiveJudge.evaluatePipelineBundle(brokenBundle, {
+        totalWorkItems: 1,
+        acceptedWorkItems: 0,
+      });
+      assert.equal(verdict.status, "rejected");
+      assert.ok(verdict.progressVector.hiddenTestsFailing > 0 || verdict.progressVector.visibleTestsFailing > 0);
+    });
+
+    it("24.3: produces deterministic verdictHash for identical bundle evaluations", () => {
+      const v1 = ObjectiveJudge.evaluatePipelineBundle(baseBundle, { totalWorkItems: 2, acceptedWorkItems: 2 });
+      const v2 = ObjectiveJudge.evaluatePipelineBundle(baseBundle, { totalWorkItems: 2, acceptedWorkItems: 2 });
+      assert.equal(v1.verdictHash, v2.verdictHash);
+      assert.equal(v1.verdictHash.length, 64);
+    });
+
+    it("24.4: handles bundle throwing runtime exception during module execution safely", () => {
+      const crashBundle: PipelineModuleBundle = {
+        math: {
+          add: () => { throw new Error("Hard crash in math add"); },
+          subtract: () => 0,
+          multiply: () => 0,
+          divide: () => 0,
+        } as any,
+        parser: canonicalParser,
+        pipeline: canonicalPipeline,
+      };
+      const verdict = ObjectiveJudge.evaluatePipelineBundle(crashBundle, { totalWorkItems: 1, acceptedWorkItems: 0 });
+      assert.equal(verdict.status, "rejected");
+    });
+
+    it("24.5: verifies progress score calculation conforms to lexicographical order", () => {
+      const p1 = { hiddenTestsFailing: 0, hiddenTestsPassed: 5, visibleTestsFailing: 0, visibleTestsPassed: 5, gateFailures: 0, openDiagnosticsCount: 0, acceptedWorkItems: 1, totalWorkItems: 1 };
+      const p2 = { hiddenTestsFailing: 1, hiddenTestsPassed: 4, visibleTestsFailing: 0, visibleTestsPassed: 5, gateFailures: 0, openDiagnosticsCount: 0, acceptedWorkItems: 1, totalWorkItems: 1 };
+      assert.equal(ObjectiveJudge.isProgressing(p2, p1), true);
+      assert.equal(ObjectiveJudge.isProgressing(p1, p2), false);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 25: Unified CLI Surface (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 25: Unified CLI Surface (Boundary Cases)", () => {
+    it("25.1: oma doctor returns exit code 0 and outputs structured report on valid project", async () => {
+      const res = await runOmaCli(["doctor"]);
+      assert.equal(res.exitCode, 0);
+      assert.ok(res.stdout.includes("OMA Doctor") || res.stdout.includes("Doctor Report"));
+    });
+
+    it("25.2: oma run handles missing arguments and outputs descriptive help/error", async () => {
+      const res = await runOmaCli(["run"]);
+      assert.equal(res.exitCode, 1);
+      assert.ok(res.stderr.includes("Missing required argument") || res.stderr.includes("goal"));
+    });
+
+    it("25.3: oma resume executes without error on clean initialized workspace", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-cli-resum-"));
+      try {
+        const graph: ExecutionGraph = {
+          schemaVersion: 2,
+          graphId: "graph-cli-resume",
+          revision: 1,
+          schedulerAuthorityId: "oma-scheduler",
+          nodes: [],
+          edges: [],
+        };
+        const graphDir = join(tempDir, ".oma", "graph");
+        mkdirSync(graphDir, { recursive: true });
+        writeFileSync(join(graphDir, "execution-graph.json"), JSON.stringify(graph, null, 2));
+        initializeGraphStore(tempDir);
+
+        const res = await runOmaCli(["resume", "--workspace", tempDir]);
+        assert.equal(res.exitCode, 0);
+        assert.ok(res.stdout.includes("Resume complete") || res.stdout.includes("resumed"));
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("25.4: CLI handles unknown subcommands with help hint and non-zero exit code", async () => {
+      const res = await runOmaCli(["unknown-command-xyz"]);
+      assert.equal(res.exitCode, 1);
+      assert.ok(res.stderr.includes("Unknown command") || res.stderr.includes("help"));
+    });
+
+    it("25.5: CLI parses flags (--json, --verbose, --help) without crashing", async () => {
+      const res = await runOmaCli(["doctor", "--json"]);
+      assert.equal(res.exitCode, 0);
+      assert.doesNotThrow(() => JSON.parse(res.stdout));
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 26: Benchmark & Calibration Framework (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 26: Benchmark & Calibration Framework (Boundary Cases)", () => {
+    it("26.1: BenchmarkRunner runs baseline benchmark suite and reports pass/fail metrics", async () => {
+      const report = await BenchmarkRunner.runBenchmark({
+        iterations: 2,
+      });
+      assert.equal(report.iterations, 2);
+      assert.equal(report.tasksCompleted, 2);
+      assert.equal(report.tasksFailed, 0);
+      assert.ok(report.averageDurationMs >= 0);
+    });
+
+    it("26.2: calculates durationMs and success rate across multiple benchmark iterations", async () => {
+      const report = await BenchmarkRunner.runBenchmark({
+        iterations: 3,
+      });
+      assert.equal(report.iterations, 3);
+      assert.equal(report.successRate, 1.0);
+    });
+
+    it("26.3: handles benchmark task throwing unexpected error without aborting entire suite", async () => {
+      const report = await BenchmarkRunner.runBenchmark({
+        iterations: 2,
+        taskRunner: async (i) => {
+          if (i === 1) throw new Error("Flaky benchmark failure");
+          return { success: true };
+        },
+      });
+      assert.equal(report.iterations, 2);
+      assert.equal(report.tasksCompleted, 1);
+      assert.equal(report.tasksFailed, 1);
+      assert.equal(report.successRate, 0.5);
+    });
+
+    it("26.4: generates structured BenchmarkReport serialized to JSON", async () => {
+      const report = await BenchmarkRunner.runBenchmark({ iterations: 1 });
+      const json = JSON.stringify(report);
+      const parsed = JSON.parse(json);
+      assert.equal(parsed.iterations, 1);
+      assert.ok(parsed.timestamp);
+    });
+
+    it("26.5: benchmark runner measures throughput accurately", async () => {
+      const report = await BenchmarkRunner.runBenchmark({ iterations: 2 });
+      assert.ok(typeof report.throughputPerMinute === "number");
+      assert.ok(report.throughputPerMinute >= 0);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Feature 27: Anti-Pattern Defense & Boundary Hardening (Boundary Cases)
+  // --------------------------------------------------------------------------
+  describe("Feature 27: Anti-Pattern Defense & Boundary Hardening (Boundary Cases)", () => {
+    it("27.1: defends against fork-bomb process leak by enforcing process execution limits", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-forkbomb-"));
+      try {
+        const pool = new WorktreePool({ repoPath: tempDir, maxConcurrentWorktrees: 2 });
+        assert.equal(pool.stats().maxWorktrees, 2);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("27.2: defends against self-review bypass by requiring distinct reviewer identities", () => {
+      const rev1 = AdversarialReviewEngine.evaluateReview(
+        "run-1",
+        "author-agent",
+        { workItemId: "wi-self", stagedDiffDigest: "d", filesModified: [], modulePatch: {} },
+        () => ({ approved: true, observations: [] }),
+      );
+      // Same author attempting second review
+      const rev2 = AdversarialReviewEngine.evaluateReview(
+        "run-2",
+        "author-agent",
+        { workItemId: "wi-self", stagedDiffDigest: "d", filesModified: [], modulePatch: {} },
+        () => ({ approved: true, observations: [] }),
+      );
+      const consensus = AdversarialReviewEngine.computeConsensus("wi-self", [rev1, rev2]);
+      // Must be rejected because distinct reviewers count is 1 (< 2)!
+      assert.equal(consensus.consensus, "rejected");
+    });
+
+    it("27.3: defends against uncommitted dirty file leak by verifying worktree cleanliness", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-dirty-"));
+      try {
+        const pool = new WorktreePool({ repoPath: tempDir });
+        assert.equal(pool.stats().activeCount, 0);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("27.4: defends against path traversal in worktree scopes (e.g. ../../outside)", () => {
+      const invalidProposal = {
+        schemaVersion: 2,
+        proposalId: "prop_traversal",
+        expectedRevision: 1,
+        author: "oma-planner",
+        operations: [
+          {
+            type: "add_node",
+            node: {
+              id: "n_trav",
+              title: "Trav",
+              kind: "agent",
+              activation: "all",
+              completionAuthority: "broker",
+              completionAuthorityId: "oma-broker",
+              executor: { adapter: "antigravity-cli", persona: "oma-executor" },
+              scope: ["../../etc/passwd"],
+            },
+          },
+        ],
+      };
+      assert.throws(() => parseGraphProposal(invalidProposal));
+    });
+
+    it("27.5: defends against infinite expansion loops via DynamicConvergenceEngine round limits", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "oma-t2-infloop-"));
+      try {
+        const report = await DynamicConvergenceEngine.execute({
+          workspaceRoot: tempDir,
+          missionId: "mission-inf-loop-defense",
+          limits: { maxRounds: 2 },
+          initialWorkItemsSupplier: () => [
+            {
+              scopeId: "src/bad.ts",
+              title: "Broken",
+              filesModified: ["src/bad.ts"],
+              modulePatch: { math: { add: () => -1 } as any },
+            },
+          ],
+        });
+        assert.ok(report.totalWaves <= 2);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+});

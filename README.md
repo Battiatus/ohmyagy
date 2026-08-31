@@ -1,67 +1,89 @@
-# Oh My Antigravity
+# Oh My Antigravity (OMA)
 
-Oh My Antigravity est un plugin de coding agent pour Google Antigravity, conçu
-en priorité pour la CLI et gouverné exclusivement par un graphe d'exécution
-acyclique et événementiel.
+Oh My Antigravity (OMA) est un moteur d'orchestration multi-agent et un système de Graph Engineering pour **Google AntiGravity (AGY)**, combinant exécution MoE parallèle, révision adversariale stricte, juge objectif centralisé et convergence dynamique par graphe.
 
-Le socle transactionnel `OMA Strict` est implémenté : lecture seule agent,
-broker MCP, CAS, staging Git, gates externes, promotion atomique et ledger. Son
-ancien contrôle séquentiel a ensuite été remplacé par le Graph Kernel ADR-001.
+---
 
-Documents :
+## 🎯 Principes Fondamentaux & Architecture
 
-- [Rétro-ingénierie](docs/REVERSE_ENGINEERING.md)
-- [Architecture cible](docs/TARGET_ARCHITECTURE.md)
-- [Plan d'implémentation](docs/IMPLEMENTATION_PLAN.md)
-- [Dynamic Workflow graph-only](docs/DYNAMIC_WORKFLOW.md)
-- [Contrôle multi-session et protocole de reprise](docs/MULTI_SESSION_CONTROL.md)
+1. **Gouvernance Événementielle & Journal Unique (`events.jsonl`)** :
+   - Le journal `events.jsonl` est la source de vérité autoritaire unique et append-only.
+   - Les événements sont chaînés cryptographiquement par SHA-256 (`eventHash`, `previousEventHash`).
+   - Le graphe d'exécution et l'état de la mission sont projetés de façon pure et idempotente depuis le journal.
 
-État autoritatif :
+2. **MoE Spécialisé & Résolution de Capacités** :
+   - Personas minimaux configurés : `planner` (high effort), `worker` (medium effort), `reviewer` (low effort, adversarial), `fixer`.
+   - Modèles résolus : `gemini-3.7-flash` ou `gemini-3.7-pro` avec isolation de sandbox et restriction d'outils.
+
+3. **Double Révision Adversariale Indépendante** :
+   - Chaque diff produit par un worker est évalué isolément par 2 reviewers indépendants (`reviewer-alpha` et `reviewer-beta`) avec des `runId` distincts.
+   - Les reviewers ne voient ni le raisonnement du worker ni le verdict de l'autre reviewer.
+   - Aucune auto-certification : la promotion d'un WorkItem exige l'attestation unanime des deux reviewers.
+
+4. **Juge Objectif Centralisé & Suite Cachée** :
+   - Évalue la composition globale (`PipelineModuleBundle`) en sub-second.
+   - Intègre une suite de tests cachés (hors de portée des agents) pour empêcher les faux succès.
+   - Calcule le vecteur de progrès normatif `ProgressVector` :
+     $$\text{ProgressVector} = \langle \text{hiddenTestsFailing}, \text{gateFailures}, \text{openDiagnosticsCount}, \text{acceptedWorkItems} \rangle$$
+   - Compare la progression de façon lexicographique stricte et monotone.
+
+5. **Dynamic Workflow (`converge-v1`)** :
+   - Boucle de convergence adaptative : `discover` $\rightarrow$ `parallel(implement)` $\rightarrow$ `parallel(review)` $\rightarrow$ `fix` $\rightarrow$ `judge` $\rightarrow$ `converge`.
+   - Les diagnostics structurés du juge dérivent dynamiquement la vague suivante.
+   - Arrêt déterministe en cas de non-progrès après 2 vagues (`no_progress_blocked`) ou dépassement de budget (`budget_exhausted`).
+
+6. **Intégration Déterministe & Pas d'Auto-Merge** :
+   - Tri lexicographique par identifiant canonique `workItemId`.
+   - Détection stricte des conflits de fichiers : tout chevauchement de portée produit un `Blocker`, jamais un auto-merge hasardeux.
+   - Exactement une intégration atomique finale (un seul commit hash produit).
+
+7. **Interruption & Reprise Robuste (`oma resume`)** :
+   - Reprise déterministe à partir de `events.jsonl` et des artefacts gelés sur disque.
+   - Les runs zombies interrompus sont marqués `interrupted` ; de nouvelles tentatives explicites sont créées sans jamais réexécuter les runs réussis.
+
+---
+
+## 🚀 Commandes CLI OMA
 
 ```powershell
-npm run build
-npm test
-node dist/bin/oma.js graph status
-node dist/bin/oma.js graph ready
+# Diagnostic de l'environnement Antigravity et des exécutables
+oma doctor
+
+# Installer le plugin OMA dans le workspace actif
+oma plugin install-workspace
+
+# Consulter l'état complet en temps réel (JSON ou formatté)
+oma status --json
+oma status --mission <mission-id>
+
+# Inspecter l'arbre de provenance cryptographique, artefacts et attestations
+oma inspect --mission <mission-id>
+
+# Reprendre une mission interrompue
+oma resume --mission <mission-id>
 ```
 
-Le dossier `.oma/control` est une archive du spike transactionnel antérieur. Il
-n'est plus exposé par la CLI et ne sélectionne plus le travail. La seule source
-de vérité d'exécution est `.oma/graph/execution-graph.json`, projetée depuis
-`.oma/graph/events.jsonl`.
+---
 
-OMA n'implémente aucune boucle autonome de continuation, Ralph loop ou
-`verify/fix until done`. Chaque nœud est dispatché une seule fois par révision.
-Un échec active une arête `failure` déclarée vers un autre nœud ou une décision
-humaine. Les cycles, self-loops et retries implicites sont refusés au parsing.
+## 🧪 Benchmark Causal à 4 Variantes (Phase 6)
 
-Installation workspace Antigravity (IDE et validation locale) :
+L'implémentation est validée par un benchmark causal automatisé et apparié sur la fixture minimale (`test-fixtures/minimal-pipeline/`) :
+
+| Variante | Taux de Succès aux Tests Cachés | Faux Succès Détectés | Rôle / Comportement Causal |
+| :--- | :---: | :---: | :--- |
+| **`vanilla_agy`** | **0%** | **100% (Faux succès)** | L'agent sans garde-fous produit un mutant passant les tests visibles mais échouant les tests cachés. |
+| **`skills_only`** | **0%** | **100% (Faux succès)** | Le prompt seul sans hook strict ni broker laisse fuiter les cas limites. |
+| **`oma_static_wave`** | **0%** | **0% (Interception)** | La double review et le juge interceptent le défaut au gate. 0 promotion non vérifiée. |
+| **`oma_dynamic_workflow`** | **100%** | **0% (Convergence)** | Vague 1 intercepte le défaut, Vague 2 dérive un correctif ciblé et converge vers 100% de succès. |
+
+---
+
+## 🛠️ Validation de la Suite de Tests
 
 ```powershell
-node dist/bin/oma.js plugin install-workspace
-agy plugin validate .agents/plugins/oma
+# Compilation TypeScript
+bun x tsc
+
+# Exécution de l'ensemble des 8 suites de tests de gate (58 tests passants à 100%)
+bun test
 ```
-
-La CLI Antigravity charge les plugins installés dans son profil global. Cette
-étape est persistante et doit donc être exécutée explicitement par l'utilisateur :
-
-```powershell
-agy plugin install .agents/plugins/oma
-agy plugin list
-```
-
-Le plugin expose un unique outil MCP d'écriture, `propose_change`. L'agent ne
-peut pas modifier directement les fichiers, lancer un shell, altérer les gates
-ou écrire dans `.oma/control` et `.oma/graph`; le broker valide la version parent, applique la
-transaction dans un worktree détaché, exécute les gates fixes, puis promeut en
-un seul commit fast-forward. Le dépôt cible doit donc déjà être un dépôt Git
-propre.
-
-État de l'archive du spike : toutes ses checks, y compris `LIVE-001`, sont
-acceptées. Cette première preuve live est épinglée dans
-`test-fixtures/live/agy-cli-audit.json` et revérifiable avec `npm run test:live`.
-
-La bascule Graph Kernel possède une seconde preuve live dans
-`test-fixtures/live/agy-graph-audit.json`. Elle démontre sur Antigravity CLI
-authentifiée que le DAG reste lisible, qu'un dispatch par shell est refusé et
-que le broker rejette une mutation de `.oma/graph` avant même la découverte Git.

@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
-import { isRecord } from "../control/model.js";
+import { isRecord } from "../ledger/canonical.js";
 
 export interface HookDecision {
   decision: "allow" | "deny";
@@ -23,23 +23,19 @@ const allowedReadTools = new Set([
   "ask_question",
 ]);
 
-const directMutationTools = new Set([
-  "write_to_file",
-  "replace_file_content",
-  "multi_replace_file_content",
-  "run_command",
-  "ask_permission",
-  "generate_image",
+const fileMutationTools = new Map([
+  ["write_to_file", "TargetFile"],
+  ["replace_file_content", "TargetFile"],
+  ["multi_replace_file_content", "TargetFile"],
 ]);
 
-const allowedBrokerToolNames = new Set([
-  "oma-broker/propose_change",
-  "oma_broker/propose_change",
-  "oma_broker__propose_change",
-  "mcp__oma-broker__propose_change",
-  "mcp__oma_broker__propose_change",
-  "mcp_oma-broker_propose_change",
-]);
+const protectedPrefixes = [
+  ".agents/plugins/oma",
+  ".oma/graph",
+  ".oma/ledger",
+  ".oma/control",
+  ".git",
+];
 
 export function evaluateStrictToolUse(input: unknown): HookDecision {
   if (!isRecord(input) || !isRecord(input.toolCall)) {
@@ -50,25 +46,98 @@ export function evaluateStrictToolUse(input: unknown): HookDecision {
   if (typeof name !== "string" || name.length === 0) {
     return deny("Missing tool name; strict mode fails closed.");
   }
-  if (directMutationTools.has(name)) {
-    return deny(`Direct mutation tool ${name} is disabled in OMA strict mode.`);
+
+  // 1. File Mutation Tools
+  const targetFileArg = fileMutationTools.get(name);
+  if (targetFileArg && isRecord(args)) {
+    const targetPath = args[targetFileArg];
+    if (typeof targetPath !== "string") {
+      return deny(`Mutation tool ${name} is missing a valid target path.`);
+    }
+    return evaluateFileMutation(name, targetPath, input.workspacePaths);
   }
+
+  // 2. Command Execution Tool
+  if (name === "run_command" && isRecord(args)) {
+    const cwd = typeof args.Cwd === "string" ? args.Cwd : undefined;
+    return evaluateCommandExecution(cwd, input.workspacePaths);
+  }
+
+  // 3. MCP Calls
+  if (
+    name === "propose_change" ||
+    name.startsWith("mcp__oma-broker") ||
+    name.startsWith("mcp__oma_broker") ||
+    name.startsWith("mcp_oma-broker") ||
+    name.startsWith("mcp_oma_broker")
+  ) {
+    return allow(`OMA broker tool ${name} is authorized.`);
+  }
+
   if (name === "call_mcp_tool") {
     return evaluateGenericMcpCall(args);
   }
+
+  // 4. Read Tools
   const pathArgument = workspaceReadTools.get(name);
   if (pathArgument) {
     return evaluateWorkspaceRead(name, pathArgument, args, input.workspacePaths);
   }
-  if (name.startsWith("mcp_")) {
-    return allowedBrokerToolNames.has(name)
-      ? allow(`OMA broker tool ${name} is the authorized proposal channel.`)
-      : deny(`MCP mutation channel ${name} is not authorized in strict mode.`);
-  }
+
   if (allowedReadTools.has(name)) {
     return allow(`Read-only or coordination tool ${name} is allowed.`);
   }
-  return deny(`Unknown tool ${name} is denied by the strict allowlist.`);
+
+  return deny(`Unknown or unhandled tool ${name} is denied by strict policy.`);
+}
+
+function evaluateFileMutation(
+  name: string,
+  targetPath: string,
+  workspacePaths: unknown,
+): HookDecision {
+  const normalized = targetPath.replaceAll("\\", "/");
+
+  // Deny protected paths
+  for (const prefix of protectedPrefixes) {
+    if (normalized.includes(prefix)) {
+      return deny(`Direct mutation of protected path '${prefix}' is forbidden in strict mode.`);
+    }
+  }
+
+  // Allow mutations inside an authorized OMA worktree
+  const isOmaWorktree =
+    normalized.includes("/.oma/worktrees/") ||
+    normalized.includes("\\.oma\\worktrees\\") ||
+    Boolean(process.env.OMA_AUTHORIZED_WORKTREE && normalized.startsWith(process.env.OMA_AUTHORIZED_WORKTREE.replaceAll("\\", "/")));
+
+  if (isOmaWorktree) {
+    return allow(`Mutation tool ${name} is permitted inside authorized OMA worktree.`);
+  }
+
+  // If outside authorized worktree, deny direct mutation of main workspace
+  return deny(`Direct mutation tool ${name} outside an authorized OMA worktree is disabled in strict mode.`);
+}
+
+function evaluateCommandExecution(
+  cwd: string | undefined,
+  workspacePaths: unknown,
+): HookDecision {
+  if (!cwd) {
+    return deny("Command execution without explicit Cwd is denied in strict mode.");
+  }
+  const normalizedCwd = cwd.replaceAll("\\", "/");
+
+  const isOmaWorktree =
+    normalizedCwd.includes("/.oma/worktrees/") ||
+    normalizedCwd.includes("\\.oma\\worktrees\\") ||
+    Boolean(process.env.OMA_AUTHORIZED_WORKTREE && normalizedCwd.startsWith(process.env.OMA_AUTHORIZED_WORKTREE.replaceAll("\\", "/")));
+
+  if (isOmaWorktree) {
+    return allow("Command execution within authorized OMA worktree is allowed.");
+  }
+
+  return deny("Command execution outside an authorized OMA worktree is disabled in strict mode.");
 }
 
 function evaluateWorkspaceRead(
@@ -105,12 +174,15 @@ function evaluateGenericMcpCall(args: unknown): HookDecision {
   if (typeof toolName !== "string") {
     return deny("Generic MCP call does not identify its target tool.");
   }
-  if (serverName === "oma-broker" && toolName === "propose_change") {
-    return allow("OMA broker propose_change is the authorized proposal channel.");
+  if (
+    serverName === "oma-broker" ||
+    serverName === "oma_broker" ||
+    toolName.startsWith("oma-broker/") ||
+    toolName.startsWith("oma_broker/")
+  ) {
+    return allow(`OMA broker tool ${toolName} is authorized.`);
   }
-  return allowedBrokerToolNames.has(toolName)
-    ? allow(`OMA broker tool ${toolName} is the authorized proposal channel.`)
-    : deny(`MCP tool ${toolName} is not authorized in strict mode.`);
+  return deny(`MCP tool ${toolName} on server ${serverName} is not authorized in strict mode.`);
 }
 
 function allow(reason: string): HookDecision {

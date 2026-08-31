@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync, } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { sha256 } from "../ledger/canonical.js";
 import { validateProposal, workspaceStateFromContents, } from "./transaction.js";
 export class StagingError extends Error {
     code;
@@ -53,11 +54,15 @@ export function stageProposal(repositoryRoot, proposal) {
                 unlinkSync(target);
             }
         }
+        runGit(worktreePath, ["add", "-A"]);
+        const canonicalDiff = canonicalStagedDiff(worktreePath);
         const staged = {
             repositoryRoot: source.repositoryRoot,
             containerPath,
             worktreePath,
             transaction,
+            canonicalDiff,
+            stagedDiffDigest: sha256(canonicalDiff),
         };
         assertStagedTransactionState(staged);
         return staged;
@@ -70,6 +75,19 @@ export function stageProposal(repositoryRoot, proposal) {
         const message = error instanceof Error ? error.message : String(error);
         throw new StagingError("stage_apply_failed", `Staging failed and the worktree was discarded: ${message}`, worktreePath);
     }
+}
+export function refreshCanonicalStagedDiff(staged) {
+    assertOwnedStagingPaths(staged.containerPath, staged.worktreePath);
+    runGit(staged.worktreePath, ["add", "-A"]);
+    return canonicalStagedDiff(staged.worktreePath);
+}
+export function canonicalCommitDiff(repositoryRoot, parentVersion, commitSha) {
+    return runGit(repositoryRoot, [
+        ...canonicalDiffOptions(),
+        parentVersion,
+        commitSha,
+        "--",
+    ]);
 }
 export function discardStagedTransaction(staged) {
     assertOwnedStagingPaths(staged.containerPath, staged.worktreePath);
@@ -203,6 +221,32 @@ function runGit(root, args) {
         throw new StagingError("git_command_failed", `git ${args.join(" ")} failed: ${result.stderr.trim()}`);
     }
     return result.stdout;
+}
+function canonicalStagedDiff(worktreePath) {
+    return runGit(worktreePath, [
+        ...canonicalDiffOptions(),
+        "--cached",
+        "HEAD",
+        "--",
+    ]);
+}
+function canonicalDiffOptions() {
+    return [
+        "-c",
+        "diff.algorithm=myers",
+        "-c",
+        "diff.renames=false",
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--binary",
+        "--full-index",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-renames",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+    ];
 }
 function runGitAllowFailure(root, args) {
     const result = spawnSync("git", ["-C", root, ...args], {

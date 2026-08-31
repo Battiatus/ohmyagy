@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { hashJson } from "../control/canonical.js";
+import { hashJson, sha256 } from "../ledger/canonical.js";
 import { OracleError, claimApproval } from "../oracle/executor.js";
-import { assertStagedTransactionState, discardStagedTransaction, snapshotCleanGitWorkspace, } from "./staging.js";
+import { assertStagedTransactionState, canonicalCommitDiff, discardStagedTransaction, refreshCanonicalStagedDiff, snapshotCleanGitWorkspace, } from "./staging.js";
 export class PromotionError extends Error {
     code;
     constructor(code, message) {
@@ -12,7 +12,7 @@ export class PromotionError extends Error {
         this.name = "PromotionError";
     }
 }
-export function promoteApprovedTransaction(approval) {
+export function promoteApprovedTransaction(approval, identity) {
     let claimed;
     try {
         claimed = claimApproval(approval);
@@ -25,27 +25,51 @@ export function promoteApprovedTransaction(approval) {
     }
     const { staged, verdictHash } = claimed;
     try {
+        const currentDiffDigest = sha256(refreshCanonicalStagedDiff(staged));
+        const expectedStagedDiffDigest = identity?.expectedStagedDiffDigest ?? staged.stagedDiffDigest;
+        if (staged.stagedDiffDigest !== expectedStagedDiffDigest ||
+            currentDiffDigest !== expectedStagedDiffDigest) {
+            throw new PromotionError("staged_promoted_mismatch", `Promoted diff ${currentDiffDigest} does not match staged diff ${expectedStagedDiffDigest}.`);
+        }
         assertStagedTransactionState(staged);
         const source = snapshotCleanGitWorkspace(staged.repositoryRoot);
         if (source.version !== staged.transaction.parentVersion) {
             throw new PromotionError("stale_parent", `Source HEAD ${source.version} no longer matches ${staged.transaction.parentVersion}.`);
         }
+        let targetRef = "";
         const targetRefResult = runGitAllowFailure(staged.repositoryRoot, [
             "symbolic-ref",
             "-q",
             "HEAD",
         ]);
-        if (targetRefResult.status !== 0) {
-            throw new PromotionError("detached_source", "Atomic promotion requires the source workspace to be on a branch.");
+        if (targetRefResult.status === 0 && targetRefResult.stdout.trim()) {
+            targetRef = targetRefResult.stdout.trim();
         }
-        const targetRef = targetRefResult.stdout.trim();
+        else {
+            const branchResult = runGitAllowFailure(staged.repositoryRoot, [
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD",
+            ]);
+            const branchName = branchResult.stdout.trim();
+            if (branchResult.status === 0 && branchName && branchName !== "HEAD") {
+                targetRef = `refs/heads/${branchName}`;
+            }
+            else {
+                throw new PromotionError("detached_source", "Atomic promotion requires the source workspace to be on a branch.");
+            }
+        }
         runGit(staged.worktreePath, ["add", "-A"]);
         assertStagedTransactionState(staged);
         const treeHash = runGit(staged.worktreePath, ["write-tree"]).trim();
+        const commitTrailers = identity
+            ? [`oma-mission: ${identity.missionId}`, `oma-run: ${identity.runKey}`]
+            : [];
         const commitMessage = [
             `OMA transaction ${staged.transaction.transactionId}`,
             "",
             `Oracle-Verdict: ${verdictHash}`,
+            ...commitTrailers,
             "",
         ].join("\n");
         const commitResult = runGitAllowFailure(staged.worktreePath, ["commit-tree", treeHash, "-p", staged.transaction.parentVersion], {
@@ -63,6 +87,10 @@ export function promoteApprovedTransaction(approval) {
             throw new PromotionError("git_command_failed", `git commit-tree failed: ${commitResult.stderr.trim()}`);
         }
         const promotedVersion = commitResult.stdout.trim();
+        const diffDigest = sha256(canonicalCommitDiff(staged.worktreePath, staged.transaction.parentVersion, promotedVersion));
+        if (diffDigest !== expectedStagedDiffDigest) {
+            throw new PromotionError("staged_promoted_mismatch", `Commit diff ${diffDigest} does not match staged diff ${expectedStagedDiffDigest}.`);
+        }
         const hooksPath = join(staged.containerPath, "empty-hooks");
         mkdirSync(hooksPath);
         const mergeResult = runGitAllowFailure(staged.repositoryRoot, [
@@ -87,6 +115,9 @@ export function promoteApprovedTransaction(approval) {
             verdictHash,
             parentVersion: staged.transaction.parentVersion,
             promotedVersion,
+            commitSha: promotedVersion,
+            stagedDiffDigest: expectedStagedDiffDigest,
+            diffDigest,
             targetRef,
         };
     }
