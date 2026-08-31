@@ -560,7 +560,6 @@ describe("Tier 2: Boundary & Corner Cases — Features 1 to 9", () => {
           eventType: "node_dispatched",
           nodeId: "term_node",
           dispatchId: "disp-term",
-          authority: "scheduler",
           authorityId: "oma-scheduler",
         });
         appendGraphTransition(runtime, {

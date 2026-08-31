@@ -45,7 +45,6 @@ describe("Tier 2: Boundary & Corner Cases — Features 10 to 18", () => {
           eventType: "node_dispatched",
           nodeId: "node-failed",
           dispatchId: "disp-f1",
-          authority: "scheduler",
           authorityId: "oma-scheduler",
         });
         appendGraphTransition(runtime, {
@@ -109,7 +108,6 @@ describe("Tier 2: Boundary & Corner Cases — Features 10 to 18", () => {
           eventType: "node_dispatched",
           nodeId: "parent_node",
           dispatchId: "disp-p",
-          authority: "scheduler",
           authorityId: "oma-scheduler",
         });
         appendGraphTransition(runtime, {
@@ -165,7 +163,6 @@ describe("Tier 2: Boundary & Corner Cases — Features 10 to 18", () => {
           eventType: "node_dispatched",
           nodeId: "failed_worker",
           dispatchId: "disp-f3",
-          authority: "scheduler",
           authorityId: "oma-scheduler",
         });
         appendGraphTransition(runtime, {

@@ -318,6 +318,7 @@ export class BenchmarkRunner {
     };
 
     const resultsFilePath = join(benchmarkDir, `results-${Date.now()}.json`);
+    mkdirSync(benchmarkDir, { recursive: true });
     writeFileSync(
       resultsFilePath,
       JSON.stringify({ summary, rawResults }, null, 2),

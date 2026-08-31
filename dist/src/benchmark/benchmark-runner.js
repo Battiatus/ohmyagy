@@ -274,6 +274,7 @@ export class BenchmarkRunner {
             causalFindings,
         };
         const resultsFilePath = join(benchmarkDir, `results-${Date.now()}.json`);
+        mkdirSync(benchmarkDir, { recursive: true });
         writeFileSync(resultsFilePath, JSON.stringify({ summary, rawResults }, null, 2), "utf8");
         const reportMarkdown = BenchmarkRunner.generateMarkdownReport(summary, rawResults);
         const reportFilePath = join(benchmarkDir, "causal_benchmark_report.md");

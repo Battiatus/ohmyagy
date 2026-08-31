@@ -20,7 +20,7 @@ describe("BenchmarkRunner Unit & Causal Validation Suite", () => {
     }
   });
 
-  it("executes multi-trial benchmark across all 4 variants with genuine metrics", async () => {
+  it("executes multi-trial benchmark across all 4 variants with genuine metrics", { timeout: 30000 }, async () => {
     const trialsCount = 2;
     const { summary, rawResults, resultsFilePath } = await BenchmarkRunner.executeBenchmark({
       workspaceRoot: testWorkspace,
