@@ -196,13 +196,13 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 appendGraphTransition(runtime, {
                     eventType: "node_dispatched",
                     nodeId: "task_prep",
-                    dispatchId: "disp-prep",
+                    dispatchId: "disp-prep-epoch-1",
                     authorityId: "oma-scheduler",
                 });
                 appendGraphTransition(runtime, {
                     eventType: "node_completed",
                     nodeId: "task_prep",
-                    dispatchId: "disp-prep",
+                    dispatchId: "disp-prep-epoch-1",
                     outcome: "success",
                     authority: "broker",
                     authorityId: "oma-broker",
@@ -211,7 +211,7 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 appendGraphTransition(runtime, {
                     eventType: "node_dispatched",
                     nodeId: "task_heavy",
-                    dispatchId: "disp-heavy-zombie",
+                    dispatchId: "disp-heavy-zombie-epoch-1",
                     authorityId: "oma-scheduler",
                 });
                 const zombieWorktree = join(tempDir, ".oma", "worktrees", "wt-task-heavy-zombie");
@@ -224,7 +224,7 @@ describe("Tier 5: Adversarial Stress & Hardening Suite", () => {
                 assert.equal(resumption.inFlightResumed.length, 1);
                 assert.equal(resumption.inFlightResumed[0], "task_heavy");
                 assert.equal(resumption.activeEpoch, 2, "Active epoch must advance from 1 to 2");
-                assert.ok(resumption.readySet.includes("task_heavy"));
+                assert.ok(resumption.purgedZombies.includes("task_heavy"));
                 assert.ok(!resumption.readySet.includes("task_prep"));
                 assert.equal(existsSync(zombieWorktree), false);
             }

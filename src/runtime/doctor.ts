@@ -100,7 +100,7 @@ export class OmaDoctor {
 
           // Attempt --version
           try {
-            const verOut = execSync(`"${resolvedPath}" --version`, { encoding: "utf8" }).trim();
+            const verOut = execSync(`"${resolvedPath}" --version`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
             agyInfo.version = verOut;
           } catch {
             agyInfo.version = "unknown";
@@ -108,7 +108,7 @@ export class OmaDoctor {
 
           // Attempt --help to detect flags
           try {
-            const helpOut = execSync(`"${resolvedPath}" --help`, { encoding: "utf8" });
+            const helpOut = execSync(`"${resolvedPath}" --help`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
             const flags = ["--agent", "-p", "--output-format", "--effort", "--sandbox", "--json-schema", "--model"];
             agyInfo.supportedFlags = flags.filter((f) => helpOut.includes(f));
           } catch {
@@ -139,8 +139,8 @@ export class OmaDoctor {
       if (agyInfo.available && agyInfo.path) {
         try {
           const agentsOutput = execSync(`"${agyInfo.path}" agents`, {
-            cwd: existsSync(workspaceRoot) ? workspaceRoot : undefined,
             encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
           });
           for (const line of agentsOutput.split(/\r?\n/)) {
             const match = line.match(/^\s*-\s*([a-zA-Z0-9_-]+)/);
@@ -154,8 +154,8 @@ export class OmaDoctor {
 
         try {
           const pluginOutput = execSync(`"${agyInfo.path}" plugin list`, {
-            cwd: existsSync(workspaceRoot) ? workspaceRoot : undefined,
             encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
           });
           if (!pluginOutput.includes("oma")) {
             diagnostics.push("OMA plugin is not listed in live `agy plugin list` output");
