@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from "bun:test";
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +7,7 @@ import { BenchmarkRunner } from '../benchmark-runner.js';
 import { ObjectiveJudge, type PipelineModuleBundle, type ProgressVector } from '../../oracle/objective-judge.js';
 import { DynamicConvergenceEngine } from '../../orchestration/dynamic-engine.js';
 import { WaveScheduler } from '../../orchestration/wave-scheduler.js';
+import { MockAgyDriver } from '../../runtime/mock-driver.js';
 import type { BenchmarkTrialResult, BenchmarkComparisonSummary } from '../types.js';
 
 import * as originalMath from '../../../test-fixtures/minimal-pipeline/src/math.js';
@@ -31,6 +32,7 @@ describe('Empirical Benchmark and Oracle Adversarial Challenge', () => {
         const { rawResults } = await BenchmarkRunner.executeBenchmark({
           workspaceRoot: testDir,
           trialsPerVariant,
+          driver: new MockAgyDriver(),
         });
 
         assert.equal(rawResults.length, 4 * trialsPerVariant);
@@ -72,6 +74,7 @@ describe('Empirical Benchmark and Oracle Adversarial Challenge', () => {
           missionId: 'bench-delay-test',
           eventsPath: join(testDir, 'events.jsonl'),
           baseBundle,
+          driver: new MockAgyDriver(),
           workItems: [
             {
               scopeId: 'src/math.ts',
@@ -267,6 +270,7 @@ describe('Empirical Benchmark and Oracle Adversarial Challenge', () => {
           workspaceRoot: testDir,
           missionId: 'mission-corrupt-fixer',
           baseBundle,
+          driver: new MockAgyDriver(),
           limits: { maxRounds: 2, maxConsecutiveNoProgressRounds: 1 },
           initialWorkItemsSupplier: () => [
             {

@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import {
   discardStagedTransaction,
   snapshotCleanGitWorkspace,
@@ -19,7 +19,7 @@ import {
 import { contentHash } from "../../broker/transaction.js";
 import { evaluateStagedTransaction } from "../executor.js";
 
-test("a failing gate discards staging and cannot yield an approval", () => {
+test("a failing gate discards staging and cannot yield an approval", { timeout: 30000 }, () => {
   const repo = createRepository();
   try {
     const source = snapshotCleanGitWorkspace(repo.root);
@@ -50,7 +50,7 @@ test("a failing gate discards staging and cannot yield an approval", () => {
   }
 });
 
-test("a gate that mutates staging is rejected even with exit code zero", () => {
+test("a gate that mutates staging is rejected even with exit code zero", { timeout: 30000 }, () => {
   const repo = createRepository();
   try {
     const source = snapshotCleanGitWorkspace(repo.root);
@@ -72,7 +72,7 @@ test("a gate that mutates staging is rejected even with exit code zero", () => {
   }
 });
 
-test("all passing immutable gates yield an opaque approval", () => {
+test("all passing immutable gates yield an opaque approval", { timeout: 30000 }, () => {
   const repo = createRepository();
   try {
     const source = snapshotCleanGitWorkspace(repo.root);

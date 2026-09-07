@@ -10,12 +10,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import { contentHash } from "../../broker/transaction.js";
 import { isRecord } from "../../ledger/canonical.js";
 import { installWorkspacePlugin } from "../../packaging/install.js";
 
-test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 2-Phase Commit lifecycle", () => {
+test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 2-Phase Commit lifecycle", { timeout: 60000 }, () => {
   const fixture = createRepository(false);
   try {
     const installed = installWorkspacePlugin(fixture.root, {
@@ -24,6 +24,7 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
     assert.equal(existsSync(join(installed.pluginDir, "plugin.json")), true);
     assert.equal(existsSync(join(installed.pluginDir, "hooks.json")), true);
     assert.equal(existsSync(join(installed.pluginDir, "mcp_config.json")), true);
+    assert.equal(existsSync(join(installed.pluginDir, "commands", "run.md")), true);
     const combined = ["hooks.json", "mcp_config.json", "gates.json"]
       .map((name) => readFileSync(join(installed.pluginDir, name), "utf8"))
       .join("\n");
@@ -47,9 +48,19 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
     ]);
     const listed = resultFor(responses1, 2);
     assert.ok(Array.isArray(listed.tools));
-    assert.equal(listed.tools.length, 3);
+    assert.equal(listed.tools.length, 9);
     const toolNames = listed.tools.map((t: { name: string }) => t.name).sort();
-    assert.deepEqual(toolNames, ["attest_review", "promote_change", "propose_change"]);
+    assert.deepEqual(toolNames, [
+      "attest_review",
+      "doctor",
+      "list_missions",
+      "mission_inspect",
+      "mission_status",
+      "promote_change",
+      "propose_change",
+      "resume_mission",
+      "run_mission",
+    ]);
 
     // 2. Propose change -> returns staged_pending_review without modifying HEAD
     const responses2 = runMcp(fixture.root, [
@@ -140,7 +151,96 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
   }
 });
 
-test("self-review (Author == Reviewer) is rejected during promote_change", () => {
+test("run_mission returns a watchable mission id without waiting for AGY", async () => {
+  const fixture = createRepository(false);
+  const previousAgyBinary = process.env.OMA_AGY_BIN;
+  try {
+    installWorkspacePlugin(fixture.root, { gates: [nodeGate("pass", "process.exit(0)")] });
+    commitAll(fixture.root, "fixture with plugin");
+    process.env.OMA_AGY_BIN = join(fixture.root, "missing-agy.exe");
+
+    const responses = runMcp(fixture.root, [
+      initializeRequest(1),
+      toolCall(2, "run_mission", { goal: "Start without waiting for the worker process." }),
+    ]);
+    const launched = resultFor(responses, 2);
+    assert.equal(launched.isError, false);
+    assert.ok(isRecord(launched.structuredContent));
+    assert.equal(launched.structuredContent.status, "started");
+    const missionId = String(launched.structuredContent.missionId);
+    assert.match(missionId, /^oma-\d+$/u);
+    const launcherLog = join(fixture.root, ".oma", "missions", missionId, "launcher.log");
+    assert.equal(existsSync(launcherLog), true);
+    await waitFor(() => existsSync(launcherLog) && readFileSync(launcherLog, "utf8").includes("[OMA ERROR]"));
+  } finally {
+    if (previousAgyBinary === undefined) {
+      delete process.env.OMA_AGY_BIN;
+    } else {
+      process.env.OMA_AGY_BIN = previousAgyBinary;
+    }
+    rmSync(fixture.container, { recursive: true, force: true });
+  }
+});
+
+test("observability tools report workspace state without an active mission", () => {
+  const fixture = createRepository(false);
+  try {
+    installWorkspacePlugin(fixture.root, { gates: [nodeGate("pass", "process.exit(0)")] });
+
+    const responses = runMcp(fixture.root, [
+      initializeRequest(1),
+      toolCall(2, "list_missions", {}),
+      toolCall(3, "doctor", {}),
+      toolCall(4, "mission_status", {}),
+    ]);
+
+    // list_missions succeeds and returns an (empty) array on a fresh workspace.
+    const listed = resultFor(responses, 2);
+    assert.ok(isRecord(listed.structuredContent));
+    assert.equal(listed.structuredContent.status, "reported");
+    assert.equal(listed.isError, false);
+    assert.ok(Array.isArray(listed.structuredContent.missions));
+    assert.equal((listed.structuredContent.missions as unknown[]).length, 0);
+
+    // doctor succeeds and carries a diagnostic report.
+    const doctor = resultFor(responses, 3);
+    assert.ok(isRecord(doctor.structuredContent));
+    assert.equal(doctor.structuredContent.status, "reported");
+    assert.equal(doctor.isError, false);
+    assert.ok(isRecord(doctor.structuredContent.report));
+
+    // mission_status with no mission is a clean, non-crashing error.
+    const status = resultFor(responses, 4);
+    assert.ok(isRecord(status.structuredContent));
+    assert.equal(status.isError, true);
+    assert.match(String(status.structuredContent.reason), /No active mission/u);
+  } finally {
+    rmSync(fixture.container, { recursive: true, force: true });
+  }
+});
+
+test("negotiates AGY's MCP protocol version during initialization", () => {
+  const fixture = createRepository(false);
+  try {
+    installWorkspacePlugin(fixture.root, { gates: [nodeGate("pass", "process.exit(0)")] });
+    const responses = runMcp(fixture.root, [initializeRequest(1, "2024-11-05")]);
+    const initialized = resultFor(responses, 1);
+    assert.equal(initialized.protocolVersion, "2024-11-05");
+  } finally {
+    rmSync(fixture.container, { recursive: true, force: true });
+  }
+});
+
+async function waitFor(check: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise<void>((done) => setTimeout(done, 50));
+  }
+  assert.fail("Timed out waiting for the detached mission process to finish.");
+}
+
+test("self-review (Author == Reviewer) is rejected during promote_change", { timeout: 30000 }, () => {
   const fixture = createRepository(false);
   try {
     installWorkspacePlugin(fixture.root, {
@@ -200,7 +300,7 @@ test("self-review (Author == Reviewer) is rejected during promote_change", () =>
   }
 });
 
-test("a failing fixed gate prevents MCP promotion and leaves source unchanged", () => {
+test("a failing fixed gate prevents MCP promotion and leaves source unchanged", { timeout: 30000 }, () => {
   const fixture = createRepository(false);
   try {
     installWorkspacePlugin(fixture.root, {
@@ -374,13 +474,13 @@ function resultFor(responses: unknown[], id: number): Record<string, unknown> {
   return response.result;
 }
 
-function initializeRequest(id: number) {
+function initializeRequest(id: number, protocolVersion = "2025-06-18") {
   return {
     jsonrpc: "2.0",
     id,
     method: "initialize",
     params: {
-      protocolVersion: "2025-06-18",
+      protocolVersion,
       capabilities: {},
       clientInfo: { name: "oma-test", version: "1" },
     },

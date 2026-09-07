@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { describe, it } from "node:test";
+import { describe, it, test } from "bun:test";
 import { canonicalJson, hashJson, sha256 } from "../../ledger/canonical.js";
 import {
   calculateProposalDigest,

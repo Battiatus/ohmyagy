@@ -1,5 +1,5 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "oma",
-  "description": "Oh My Antigravity strict proposal and transaction governance spike."
+  "description": "Oh My Antigravity: Multi-agent orchestration, dynamic workflows and graph engineering for Google AntiGravity."
 }

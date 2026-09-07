@@ -14,6 +14,8 @@ export type MissionEventType =
   | "gate_evaluated"
   | "integration_attempted"
   | "wave_transitioned"
+  | "wave_started"
+  | "terminal_verdict_rendered"
   | "mission_finished";
 
 export interface BaseMissionEvent {
@@ -46,7 +48,7 @@ export interface RunStartedPayload {
   workItemId: string;
   expertId: string;
   model: string;
-  effort: "low" | "medium" | "high";
+  effort: string;
   worktreePath?: string;
 }
 
@@ -103,6 +105,17 @@ export interface WaveTransitionedPayload {
   reason: string;
 }
 
+export interface WaveStartedPayload {
+  waveIndex: number;
+}
+
+export interface TerminalVerdictRenderedPayload {
+  runId: string;
+  status: "succeeded" | "failed";
+  commitSha?: string;
+  verdictHash: string;
+}
+
 export interface MissionFinishedPayload {
   finalStatus: "succeeded" | "failed" | "budget_exhausted" | "no_progress_blocked";
   totalDurationMs: number;
@@ -120,6 +133,8 @@ export type MissionEventPayload =
   | ({ type: "gate_evaluated" } & GateEvaluatedPayload)
   | ({ type: "integration_attempted" } & IntegrationAttemptedPayload)
   | ({ type: "wave_transitioned" } & WaveTransitionedPayload)
+  | ({ type: "wave_started" } & WaveStartedPayload)
+  | ({ type: "terminal_verdict_rendered" } & TerminalVerdictRenderedPayload)
   | ({ type: "mission_finished" } & MissionFinishedPayload);
 
 export type SequencedMissionEvent = BaseMissionEvent & MissionEventPayload;

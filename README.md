@@ -13,7 +13,7 @@ Oh My Antigravity (OMA) est un moteur d'orchestration multi-agent et un système
 
 2. **MoE Spécialisé & Résolution de Capacités** :
    - Personas minimaux configurés : `planner` (high effort), `worker` (medium effort), `reviewer` (low effort, adversarial), `fixer`.
-   - Modèles résolus : `gemini-3.7-flash` ou `gemini-3.7-pro` avec isolation de sandbox et restriction d'outils.
+   - Modèle et effort : laissés à la configuration native d'AGY, sauf override explicite pour un run ou un benchmark reproductible.
 
 3. **Double Révision Adversariale Indépendante** :
    - Chaque diff produit par un worker est évalué isolément par 2 reviewers indépendants (`reviewer-alpha` et `reviewer-beta`) avec des `runId` distincts.
@@ -62,6 +62,28 @@ oma inspect --mission <mission-id>
 # Reprendre une mission interrompue
 oma resume --mission <mission-id>
 ```
+
+## 💬 Palette de commandes AntiGravity
+
+Après l'installation du bundle une seule fois avec `agy plugin install <chemin-vers-le-bundle-oma>`, tout OMA se pilote depuis la conversation AGY, sans jamais ouvrir de terminal. Chaque commande s'adosse à un outil du serveur MCP `oma-broker`.
+
+```text
+/oma:run <objectif>          Démarrer une mission multi-agent pour cet objectif
+/oma:status [mission-id]     État en direct : phase, vague, work items, vecteur de progrès
+/oma:list                    Toutes les missions du workspace, la plus récente en tête
+/oma:inspect [mission-id]    Chaîne de provenance : artefacts, revues, verdict terminal
+/oma:resume [mission-id]     Reprendre une mission interrompue sans rejouer le travail acquis
+/oma:doctor                  Diagnostiquer le runtime AntiGravity et l'installation du plugin
+/oma:help                    Rappeler cette palette
+```
+
+Un `mission-id` omis vise la mission active la plus récente. Aucune commande ne demande de chemin de gates, d'identifiant de mission, de modèle ni d'effort : OMA utilise les gates configurées à l'installation et laisse modèle et effort aux valeurs natives d'AGY.
+
+```text
+/oma:run Corrige le problème X et valide les tests du projet.
+```
+
+> Les mêmes capacités restent disponibles hors conversation via le CLI (`oma status`, `oma inspect`, `oma resume`, `oma doctor`) pour l'usage scripté ou la CI.
 
 ---
 

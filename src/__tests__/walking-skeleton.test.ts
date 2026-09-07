@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import { initializeGraphStore, loadGraphRuntime } from "../graph/store.js";
 import { GraphBroker } from "../graph/broker.js";
 import { calculateProposalDigest, type GraphProposal } from "../graph/proposal.js";

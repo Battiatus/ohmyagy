@@ -1,7 +1,9 @@
 .oma/*
 .omc/*
-
 .omo/*
 node/
-node_modules
-.agents
+node_modules/
+.agents/
+dist/
+coverage/
+*.log

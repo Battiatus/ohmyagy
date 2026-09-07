@@ -1,6 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type StagedTransaction,
   discardStagedTransaction,
@@ -21,8 +23,16 @@ import {
   type TransactionStagedEvent,
 } from "../ledger/mission-journal.js";
 import type { ReviewSubject, ReviewerVerdict } from "../orchestration/model.js";
+import {
+  findActiveMissionId,
+  listMissions,
+  loadMissionProjection,
+  summarizeMission,
+} from "../mission/read-model.js";
+import { OmaDoctor } from "../runtime/doctor.js";
 
 const protocolVersion = "2025-06-18";
+const supportedProtocolVersions = new Set(["2024-11-05", protocolVersion]);
 
 export interface BrokerConfig {
   workspaceRoot: string;
@@ -110,7 +120,7 @@ export function handleRequest(
       jsonrpc: "2.0",
       id: request.id,
       result: {
-        protocolVersion,
+        protocolVersion: negotiateProtocolVersion(request.params?.protocolVersion),
         capabilities: { tools: {} },
         serverInfo: { name: "oma-broker", version: "1.0.0" },
       },
@@ -178,6 +188,70 @@ export function handleRequest(
               required: ["transactionId"],
             },
           },
+          {
+            name: "run_mission",
+            description:
+              "Run an OMA mission for a natural-language goal using this plugin's configured quality gates and AGY native model and effort defaults.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                goal: { type: "string", minLength: 1 },
+                missionId: { type: "string" },
+              },
+              required: ["goal"],
+            },
+          },
+          {
+            name: "mission_status",
+            description:
+              "Report the live status of an OMA mission: phase, current wave, ready/running/accepted work items and progress vector. Targets the active mission when no missionId is given. Read-only.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                missionId: { type: "string" },
+              },
+            },
+          },
+          {
+            name: "mission_inspect",
+            description:
+              "Inspect the cryptographic provenance chain of an OMA mission: produced artifacts, attested reviews and the terminal verdict. Targets the active mission when no missionId is given. Read-only.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                missionId: { type: "string" },
+              },
+            },
+          },
+          {
+            name: "list_missions",
+            description:
+              "List every OMA mission recorded in this workspace with its status and current wave, most recently active first. Read-only.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+            },
+          },
+          {
+            name: "resume_mission",
+            description:
+              "Resume an interrupted OMA mission from its durable journal without re-running work that already succeeded. Targets the active mission when no missionId is given.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                missionId: { type: "string" },
+              },
+            },
+          },
+          {
+            name: "doctor",
+            description:
+              "Diagnose the local AntiGravity runtime and this workspace's OMA plugin installation. Read-only.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+            },
+          },
         ],
       },
     };
@@ -193,6 +267,18 @@ export function handleRequest(
         result = executeAttestReview(config, journal, stagedRecords, input);
       } else if (toolName === "promote_change") {
         result = executePromoteChange(config, journal, stagedRecords, input);
+      } else if (toolName === "run_mission") {
+        result = executeMission(config, input);
+      } else if (toolName === "mission_status") {
+        result = executeMissionStatus(config, input);
+      } else if (toolName === "mission_inspect") {
+        result = executeMissionInspect(config, input);
+      } else if (toolName === "list_missions") {
+        result = executeListMissions(config);
+      } else if (toolName === "resume_mission") {
+        result = executeResumeMission(config, input);
+      } else if (toolName === "doctor") {
+        result = executeDoctor(config);
       } else {
         throw new Error(`Unknown tool: ${toolName}`);
       }
@@ -200,7 +286,10 @@ export function handleRequest(
       const isError =
         result.status !== "promoted" &&
         result.status !== "staged_pending_review" &&
-        result.status !== "review_attested";
+        result.status !== "review_attested" &&
+        result.status !== "started" &&
+        result.status !== "succeeded" &&
+        result.status !== "reported";
 
       return {
         jsonrpc: "2.0",
@@ -230,6 +319,91 @@ export function handleRequest(
     }
   }
   throw new Error(`Unsupported MCP method: ${request.method}`);
+}
+
+function negotiateProtocolVersion(requested: unknown): string {
+  return typeof requested === "string" && supportedProtocolVersions.has(requested)
+    ? requested
+    : protocolVersion;
+}
+
+function executeMission(config: BrokerConfig, input: unknown): Record<string, unknown> {
+  if (!isRecord(input) || typeof input.goal !== "string" || input.goal.trim().length === 0) {
+    throw new Error("run_mission requires a non-empty goal.");
+  }
+  if (input.missionId !== undefined && (typeof input.missionId !== "string" || input.missionId.trim().length === 0)) {
+    throw new Error("run_mission missionId must be a non-empty string when provided.");
+  }
+
+  const missionId = typeof input.missionId === "string" ? input.missionId : `oma-${Date.now()}`;
+  return launchDetachedCli(config, missionId, ["run", missionId, "--goal", input.goal.trim()]);
+}
+
+function executeResumeMission(config: BrokerConfig, input: unknown): Record<string, unknown> {
+  const missionId = resolveMissionId(config, input);
+  return launchDetachedCli(config, missionId, ["resume", "--mission", missionId]);
+}
+
+function launchDetachedCli(
+  config: BrokerConfig,
+  missionId: string,
+  cliArgs: string[],
+): Record<string, unknown> {
+  const missionDir = join(config.workspaceRoot, ".oma", "missions", missionId);
+  mkdirSync(missionDir, { recursive: true });
+  const launcherLogPath = join(missionDir, "launcher.log");
+  const logDescriptor = openSync(launcherLogPath, "a");
+  let invocation;
+  try {
+    const omaCliPath = fileURLToPath(new URL("../../bin/oma.js", import.meta.url));
+    invocation = spawn(process.execPath, [omaCliPath, ...cliArgs], {
+      cwd: config.workspaceRoot,
+      detached: true,
+      windowsHide: true,
+      stdio: ["ignore", logDescriptor, logDescriptor],
+    });
+    invocation.unref();
+  } finally {
+    closeSync(logDescriptor);
+  }
+  return {
+    status: "started",
+    missionId,
+    pid: invocation.pid,
+    launcherLogPath,
+  };
+}
+
+function resolveMissionId(config: BrokerConfig, input: unknown): string {
+  const explicit =
+    isRecord(input) && typeof input.missionId === "string" && input.missionId.trim().length > 0
+      ? input.missionId.trim()
+      : undefined;
+  const missionId = explicit ?? findActiveMissionId(config.workspaceRoot);
+  if (!missionId) {
+    throw new Error("No active mission found. Provide a missionId or start one with run_mission.");
+  }
+  return missionId;
+}
+
+function executeMissionStatus(config: BrokerConfig, input: unknown): Record<string, unknown> {
+  const missionId = resolveMissionId(config, input);
+  const projection = loadMissionProjection(config.workspaceRoot, missionId);
+  return { status: "reported", ...summarizeMission(missionId, projection) };
+}
+
+function executeMissionInspect(config: BrokerConfig, input: unknown): Record<string, unknown> {
+  const missionId = resolveMissionId(config, input);
+  const projection = loadMissionProjection(config.workspaceRoot, missionId);
+  return { status: "reported", missionId, provenance: projection.provenance };
+}
+
+function executeListMissions(config: BrokerConfig): Record<string, unknown> {
+  return { status: "reported", missions: listMissions(config.workspaceRoot) };
+}
+
+function executeDoctor(config: BrokerConfig): Record<string, unknown> {
+  return { status: "reported", report: OmaDoctor.diagnoseEnvironment(config.workspaceRoot) };
 }
 
 function executeProposal(

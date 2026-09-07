@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import { initializeGraphStore, appendGraphTransition, loadGraphRuntime, verifyGraphStore } from "../../graph/store.js";
 import { DeterministicResumeEngine } from "../engine.js";
 

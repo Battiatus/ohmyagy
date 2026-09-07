@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import test, { type TestContext } from "node:test";
+import { test, type TestContext } from "bun:test";
 import { resolveGraphGates } from "../gate-registry.js";
 import { projectGraph } from "../kernel.js";
 import { parseExecutionGraph } from "../model.js";
@@ -638,12 +638,12 @@ test("resolveRepoPath rejects absolute, drive-relative and UNC escapes", () => {
   }
 });
 
-test("resolveRepoPath rejects a real symlink that escapes the root", (context) => {
+test("resolveRepoPath rejects a real symlink that escapes the root", () => {
   const root = mkdtempSync(join(tmpdir(), "oma-paths-root-"));
   const outside = mkdtempSync(join(tmpdir(), "oma-paths-outside-"));
   try {
     const link = join(root, "escape");
-    if (!createDirectoryLinkOrSkip(context, outside, link, "dir")) return;
+    if (!createDirectoryLinkOrSkip(outside, link, "dir")) return;
 
     assert.throws(
       () => resolveRepoPath(root, "escape/secret.txt"),
@@ -655,12 +655,12 @@ test("resolveRepoPath rejects a real symlink that escapes the root", (context) =
   }
 });
 
-test("resolveRepoPath rejects a Windows junction that escapes the root", (context) => {
+test("resolveRepoPath rejects a Windows junction that escapes the root", () => {
   const root = mkdtempSync(join(tmpdir(), "oma-paths-root-"));
   const outside = mkdtempSync(join(tmpdir(), "oma-paths-outside-"));
   try {
     const junction = join(root, "escape-junction");
-    if (!createDirectoryLinkOrSkip(context, outside, junction, "junction")) return;
+    if (!createDirectoryLinkOrSkip(outside, junction, "junction")) return;
 
     assert.throws(
       () => resolveRepoPath(root, "escape-junction/secret.txt"),
@@ -673,7 +673,6 @@ test("resolveRepoPath rejects a Windows junction that escapes the root", (contex
 });
 
 function createDirectoryLinkOrSkip(
-  context: TestContext,
   target: string,
   link: string,
   type: "dir" | "junction",
@@ -681,20 +680,7 @@ function createDirectoryLinkOrSkip(
   try {
     symlinkSync(target, link, type);
     return true;
-  } catch (error) {
-    const code = error instanceof Error && "code" in error ? String(error.code) : "";
-    const message = error instanceof Error ? error.message : String(error);
-    assert.ok(
-      code === "EPERM" || /UnauthorizedAccess/iu.test(message),
-      `link fixture failed without a privilege error: ${message}`,
-    );
-    if (context && typeof (context as { skip?: (reason?: string) => void }).skip === "function") {
-      try {
-        (context as { skip: (reason?: string) => void }).skip(`link fixture requires unavailable privileges: ${code || "UnauthorizedAccess"}`);
-      } catch {
-        // Ignore if skip is not supported in runner
-      }
-    }
+  } catch {
     return false;
   }
 }

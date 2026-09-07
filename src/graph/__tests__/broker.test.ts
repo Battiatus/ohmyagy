@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { describe, it, afterEach } from "node:test";
+import { test, describe, it, afterEach } from "bun:test";
 import { GraphBroker } from "../broker.js";
 import {
   calculateProposalDigest,

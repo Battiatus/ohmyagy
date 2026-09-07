@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import { initializeGraphStore, appendGraphTransition } from "../../graph/store.js";
 import { ParallelScheduler } from "../scheduler.js";
 import { resumeMission } from "../resume.js";

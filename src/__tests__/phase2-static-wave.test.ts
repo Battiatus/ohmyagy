@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { describe, it } from "node:test";
+import { describe, it, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -13,6 +13,7 @@ import * as mutant2Parser from "../../test-fixtures/minimal-pipeline/src/mutants
 import { WaveScheduler, type StaticWorkItemInput } from "../orchestration/wave-scheduler.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
 import type { PipelineModuleBundle } from "../oracle/objective-judge.js";
+import { MockAgyDriver } from "../runtime/mock-driver.js";
 
 describe("Phase 2 — Une Vague Statique Réelle & Gate Observable", () => {
   const baseBundle: PipelineModuleBundle = {
@@ -53,6 +54,7 @@ describe("Phase 2 — Une Vague Statique Réelle & Gate Observable", () => {
         eventsPath,
         baseBundle,
         workItems,
+        driver: new MockAgyDriver(),
       });
 
       assert.equal(report.status, "succeeded");
@@ -103,6 +105,7 @@ describe("Phase 2 — Une Vague Statique Réelle & Gate Observable", () => {
         eventsPath,
         baseBundle,
         workItems: faultyWorkItems,
+        driver: new MockAgyDriver(),
       });
 
       assert.equal(report.status, "failed");
@@ -147,6 +150,7 @@ describe("Phase 2 — Une Vague Statique Réelle & Gate Observable", () => {
         eventsPath,
         baseBundle,
         workItems: conflictingWorkItems,
+        driver: new MockAgyDriver(),
       });
 
       assert.equal(report.status, "conflict_blocked");

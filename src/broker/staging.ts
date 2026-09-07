@@ -56,7 +56,17 @@ export interface StagedTransaction {
 
 export function snapshotCleanGitWorkspace(repositoryRoot: string): GitWorkspaceState {
   const root = requireRepositoryRoot(repositoryRoot);
-  const status = runGit(root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+  const status = runGit(root, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--",
+    ".",
+    ":(exclude).oma/**",
+    ":(exclude).agents/plugins/oma/**",
+    ":(exclude).omc/**",
+    ":(exclude).omo/**",
+  ]);
   if (status.length !== 0) {
     throw new StagingError(
       "dirty_workspace",
@@ -222,15 +232,32 @@ export function assertStagedTransactionState(staged: StagedTransaction): void {
 }
 
 function snapshotGitWorkingTree(root: string, version?: string): WorkspaceState {
-  const rawPaths = runGit(root, [
+  const trackedPaths = runGit(root, [
     "ls-files",
     "-z",
     "--cached",
+    "--",
+    ".",
+    ":(exclude).oma/**",
+    ":(exclude).agents/plugins/oma/**",
+    ":(exclude).omc/**",
+    ":(exclude).omo/**",
+  ]).split("\0").filter(Boolean);
+  const untrackedPaths = runGit(root, [
+    "ls-files",
+    "-z",
     "--others",
     "--exclude-standard",
-  ]);
+    "--",
+    ".",
+    ":(exclude).oma/**",
+    ":(exclude).agents/plugins/oma/**",
+    ":(exclude).omc/**",
+    ":(exclude).omo/**",
+  ]).split("\0").filter(Boolean);
+  const tracked = new Set(trackedPaths);
   const contents: Record<string, Buffer> = {};
-  for (const path of rawPaths.split("\0").filter(Boolean).sort()) {
+  for (const path of [...new Set([...trackedPaths, ...untrackedPaths])].sort()) {
     const absolutePath = resolveSafeTarget(root, path);
     if (!existsSync(absolutePath)) {
       continue;
@@ -245,9 +272,25 @@ function snapshotGitWorkingTree(root: string, version?: string): WorkspaceState 
     if (!stat.isFile()) {
       continue;
     }
-    contents[path] = readFileSync(absolutePath);
+    contents[path] = tracked.has(path)
+      ? readGitBlob(root, version ?? "HEAD", path)
+      : readFileSync(absolutePath);
   }
   return workspaceStateFromContents(contents, version);
+}
+
+function readGitBlob(root: string, revision: string, path: string): Buffer {
+  const result = spawnSync("git", ["-C", root, "show", `${revision}:${path}`], {
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (result.status !== 0 || !result.stdout) {
+    throw new StagingError(
+      "git_command_failed",
+      `git show ${revision}:${path} failed: ${String(result.stderr ?? "").trim()}`,
+    );
+  }
+  return Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout);
 }
 
 function requireRepositoryRoot(inputRoot: string): string {
@@ -377,6 +420,14 @@ function runGitAllowFailure(
     encoding: "utf8",
     windowsHide: true,
     maxBuffer: 10 * 1024 * 1024,
+    env: {
+      ...process.env,
+      GIT_PAGER: "cat",
+      PAGER: "cat",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_OPTIONAL_LOCKS: "0",
+    },
+    timeout: 10000,
   });
   return {
     status: result.status ?? 1,

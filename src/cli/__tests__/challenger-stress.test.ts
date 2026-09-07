@@ -1,4 +1,4 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, beforeAll, afterAll } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,11 +11,11 @@ import { MissionEventsStore } from "../../ledger/mission-events.js";
 describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => {
   let stressWorkspace: string;
 
-  before(() => {
+  beforeAll(() => {
     stressWorkspace = mkdtempSync(join(tmpdir(), "oma-stress-main-"));
   });
 
-  after(() => {
+  afterAll(() => {
     try {
       rmSync(stressWorkspace, { recursive: true, force: true });
     } catch {
@@ -63,18 +63,15 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
       }
     });
 
-    it("handles benchmark invalid trials parameters gracefully", { timeout: 60000 }, async () => {
-      // trials = -5 -> fallback to 1
+    it("refuses benchmark invocations that omit the required pinned manifest", { timeout: 60000 }, async () => {
       const code1 = await runOmaCli(["benchmark", "--trials", "-5"], stressWorkspace);
-      assert.equal(code1, 0);
+      assert.equal(code1, 1);
 
-      // trials = 'invalid' -> fallback to 1
       const code2 = await runOmaCli(["benchmark", "--trials", "invalid_string"], stressWorkspace);
-      assert.equal(code2, 0);
+      assert.equal(code2, 1);
 
-      // trials = 0 -> fallback to 1
       const code3 = await runOmaCli(["benchmark", "--trials", "0"], stressWorkspace);
-      assert.equal(code3, 0);
+      assert.equal(code3, 1);
     });
   });
 
@@ -87,18 +84,11 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
       assert.equal(code, 1);
     });
 
-    it("handles resume on already succeeded mission idempotently", async () => {
+    it("does not let OMA_MOCK_DRIVER fabricate a mission success", async () => {
       const missionId = `succeeded-mission-${Date.now()}`;
       const runCode = await runOmaCli(["run", missionId], stressWorkspace);
-      assert.equal(runCode, 0);
-
-      // Resume on the already succeeded mission
-      const resumeCode = await runOmaCli(["resume", "--mission", missionId], stressWorkspace);
-      assert.equal(resumeCode, 0);
-
-      // Inspect mission state
-      const inspectCode = await runOmaCli(["inspect", "--json", "--mission", missionId], stressWorkspace);
-      assert.equal(inspectCode, 0);
+      assert.equal(runCode, 1);
+      assert.equal(existsSync(join(stressWorkspace, ".oma", "missions", missionId, "events.jsonl")), false);
     });
 
     it("catches corrupted JSON in events.jsonl and returns exit code 1 without unhandled crash", async () => {
@@ -156,7 +146,7 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
       assert.ok(tamperedCheck.error?.includes("Invalid event payload hash"));
     });
 
-    it("recovers an interrupted mission with dangling run_started and executes successfully", async () => {
+    it("rejects a legacy dangling ledger that has no durable real graph", async () => {
       const danglingMissionId = `dangling-run-mission-${Date.now()}`;
       const missionDir = join(stressWorkspace, ".oma", "missions", danglingMissionId);
       const eventsPath = join(missionDir, "events.jsonl");
@@ -188,24 +178,9 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
         effort: "medium",
       });
 
-      // Resume the interrupted mission
       const resumeCode = await runOmaCli(["resume", "--mission", danglingMissionId], stressWorkspace);
-      assert.equal(resumeCode, 0);
-
-      // Verify status and provenance
-      const statusCode = await runOmaCli(["status", "--json", "--mission", danglingMissionId], stressWorkspace);
-      assert.equal(statusCode, 0);
-
-      const eventsAfterResume = MissionEventsStore.readEvents(eventsPath);
-      const interruptedEvent = eventsAfterResume.find(
-        (e) => e.type === "run_finished" && (e as any).status === "interrupted",
-      );
-      assert.ok(interruptedEvent, "Should record an interrupted run_finished event");
-
-      const succeededEvent = eventsAfterResume.find(
-        (e) => e.type === "mission_finished" && (e as any).finalStatus === "succeeded",
-      );
-      assert.ok(succeededEvent, "Should conclude with mission_finished succeeded");
+      assert.equal(resumeCode, 1);
+      assert.equal(MissionEventsStore.readEvents(eventsPath).length, 3);
     });
   });
 
@@ -277,7 +252,7 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
       }
     });
 
-    it("runs concurrent independent missions in parallel workspaces without cross-contamination", async () => {
+    it("rejects concurrent synthetic mission requests without cross-contamination", async () => {
       const ws1 = mkdtempSync(join(tmpdir(), "oma-para-1-"));
       const ws2 = mkdtempSync(join(tmpdir(), "oma-para-2-"));
 
@@ -286,11 +261,11 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
         const p2 = runOmaCli(["run", "mission-parallel-2"], ws2);
 
         const [code1, code2] = await Promise.all([p1, p2]);
-        assert.equal(code1, 0);
-        assert.equal(code2, 0);
+        assert.equal(code1, 1);
+        assert.equal(code2, 1);
 
-        assert.ok(existsSync(join(ws1, ".oma", "missions", "mission-parallel-1", "events.jsonl")));
-        assert.ok(existsSync(join(ws2, ".oma", "missions", "mission-parallel-2", "events.jsonl")));
+        assert.ok(!existsSync(join(ws1, ".oma", "missions", "mission-parallel-1", "events.jsonl")));
+        assert.ok(!existsSync(join(ws2, ".oma", "missions", "mission-parallel-2", "events.jsonl")));
         assert.ok(!existsSync(join(ws1, ".oma", "missions", "mission-parallel-2")));
         assert.ok(!existsSync(join(ws2, ".oma", "missions", "mission-parallel-1")));
       } finally {
@@ -332,7 +307,13 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
   describe("5. JSON Output Robustness & Format Conformance", () => {
     it("guarantees valid parseable JSON output on doctor, status --json, and inspect --json", async () => {
       const missionId = `json-test-${Date.now()}`;
-      await runOmaCli(["run", missionId], stressWorkspace);
+      const eventsPath = join(stressWorkspace, ".oma", "missions", missionId, "events.jsonl");
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "mission_started",
+        workflowDigest: "json-test",
+        rulebookRevision: "json-test",
+        goal: "Validate read-only JSON surfaces.",
+      });
 
       const capturedOutputs: { cmd: string; output: string }[] = [];
 

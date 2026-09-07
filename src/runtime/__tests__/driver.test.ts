@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
+import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import { AgyDriver } from "../agy-driver.js";
+import { AgyDriver, unwrapAgyResponse } from "../agy-driver.js";
 import { SecretScrubber } from "../secret-scrubber.js";
 
 describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
@@ -11,6 +11,7 @@ describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
       persona: "oma-executor",
       worktreeDir: "C:\\Projects\\repo\\.oma\\worktrees\\task_01",
       timeoutMs: 60000,
+      modelOverride: "gemini-2.5-flash",
       reasoningEffort: "high",
       sandboxMode: "workspace-write",
       jsonSchemaPath: "schemas/task-result.json",
@@ -23,20 +24,73 @@ describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
       "--agent",
       "oma-executor",
       "--model",
-      "gemini-3.7-flash",
+      "gemini-2.5-flash",
       "--output-format",
       "json",
       "--add-dir",
       "C:\\Projects\\repo\\.oma\\worktrees\\task_01",
       "--effort",
       "high",
-      "--sandbox",
-      "workspace-write",
+      "--print-timeout",
+      "60s",
       "--json-schema",
       "schemas/task-result.json",
       "--custom-flag",
       "value",
     ]);
+  });
+
+  it("omits the plugin agent for an isolated bare AntiGravity invocation", () => {
+    const driver = new AgyDriver({ executablePath: "agy.exe" });
+    const args = driver.buildCliArguments({
+      contractPrompt: "Implement the same task without OMA assistance",
+      persona: "worker",
+      worktreeDir: "C:\\Projects\\baseline",
+      timeoutMs: 30_000,
+      bare: true,
+    });
+
+    assert.equal(args.includes("--agent"), false);
+    assert.deepEqual(args.slice(0, 4), ["-p", "Implement the same task without OMA assistance", "--output-format", "json"]);
+  });
+
+  it("auto-approves and sandboxes write-mode runs so non-interactive edits do not hang", () => {
+    const driver = new AgyDriver({ executablePath: "agy.exe" });
+    const write = driver.buildCliArguments({
+      contractPrompt: "Edit the file",
+      persona: "worker",
+      worktreeDir: "C:\\Projects\\repo",
+      timeoutMs: 30_000,
+      executionMode: "accept-edits",
+    });
+    assert.ok(write.includes("--dangerously-skip-permissions"), "write mode must auto-approve tool permissions");
+    assert.ok(write.includes("--sandbox"), "write-mode auto-approval must be bounded by the sandbox");
+    // agy hangs when a custom --agent is combined with accept-edits; write mode runs bare.
+    assert.equal(write.includes("--agent"), false, "write mode must not name a custom agent");
+
+    // Read-only (plan) runs must NOT auto-approve or force a sandbox.
+    const plan = driver.buildCliArguments({
+      contractPrompt: "Review only",
+      persona: "reviewer",
+      worktreeDir: "C:\\Projects\\repo",
+      timeoutMs: 30_000,
+      executionMode: "plan",
+    });
+    assert.equal(plan.includes("--dangerously-skip-permissions"), false);
+    assert.equal(plan.includes("--sandbox"), false);
+  });
+
+  it("uses AGY native defaults when no model or effort override is supplied", () => {
+    const driver = new AgyDriver({ executablePath: "agy.exe" });
+    const args = driver.buildCliArguments({
+      contractPrompt: "Use the current AGY configuration",
+      persona: "worker",
+      worktreeDir: "C:\\Projects\\repo",
+      timeoutMs: 30_000,
+    });
+
+    assert.equal(args.includes("--model"), false);
+    assert.equal(args.includes("--effort"), false);
   });
 
   it("handles Windows paths with spaces and complex prompt strings safely", () => {
@@ -49,7 +103,7 @@ describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
     });
 
     assert.equal(args[1], 'Line 1\nLine 2 with "double quotes" & symbols $ % ^');
-    assert.equal(args[9], "C:\\Program Files\\My Workspace\\sub dir");
+    assert.ok(args.includes("C:\\Program Files\\My Workspace\\sub dir"));
   });
 
   it("extracts pure single JSON object from standard stdout", () => {
@@ -59,6 +113,16 @@ describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
 
     assert.equal(parseError, undefined);
     assert.deepEqual(parsed, { status: "success", summary: "Task done", exitCode: 0 });
+  });
+
+  it("unwraps the JSON payload returned in AGY's response envelope", () => {
+    const envelope = {
+      conversation_id: "agy-conversation",
+      status: "SUCCESS",
+      response: JSON.stringify({ workItems: [{ id: "planned-work" }] }),
+    };
+
+    assert.deepEqual(unwrapAgyResponse(envelope), { workItems: [{ id: "planned-work" }] });
   });
 
   it("extracts terminal result event from incremental NDJSON stream", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { describe, it } from "node:test";
+import { describe, it, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -16,6 +16,7 @@ import {
 } from "../orchestration/dynamic-engine.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
 import type { PipelineModuleBundle } from "../oracle/objective-judge.js";
+import { MockAgyDriver } from "../runtime/mock-driver.js";
 
 describe("Phase 4 — Dynamic Workflow, Convergence & Gate Observable", () => {
   const baseBundle: PipelineModuleBundle = {
@@ -34,6 +35,7 @@ describe("Phase 4 — Dynamic Workflow, Convergence & Gate Observable", () => {
         workspaceRoot: testDir,
         missionId: "mission-converge-success",
         baseBundle,
+        driver: new MockAgyDriver(),
         limits: { maxRounds: 3, maxConsecutiveNoProgressRounds: 2 },
         initialWorkItemsSupplier: (wave: number) => {
           // Wave 1: Worker introduces Mutant 1 (fails hidden tests)
@@ -98,6 +100,7 @@ describe("Phase 4 — Dynamic Workflow, Convergence & Gate Observable", () => {
         workspaceRoot: testDir,
         missionId: "mission-no-progress",
         baseBundle,
+        driver: new MockAgyDriver(),
         limits: { maxRounds: 5, maxConsecutiveNoProgressRounds: 2 },
         initialWorkItemsSupplier: (wave: number) => {
           // Stagnant mutant repeating identical failure
@@ -136,6 +139,7 @@ describe("Phase 4 — Dynamic Workflow, Convergence & Gate Observable", () => {
         workspaceRoot: testDir,
         missionId: "mission-budget-exhausted",
         baseBundle,
+        driver: new MockAgyDriver(),
         limits: { maxRounds: 2, maxConsecutiveNoProgressRounds: 5 },
         initialWorkItemsSupplier: (wave: number) => {
           counter++;

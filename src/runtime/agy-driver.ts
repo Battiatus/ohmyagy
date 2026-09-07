@@ -1,5 +1,6 @@
-import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, join } from "node:path";
 import { canonicalJson, sha256 } from "../ledger/canonical.js";
 import { ProcessRunner, type ProcessRunResult } from "./process-runner.js";
 import { SecretScrubber, defaultSecretScrubber } from "./secret-scrubber.js";
@@ -23,15 +24,24 @@ export interface DriverInvocationOptions {
   modelOverride?: string;
   reasoningEffort?: "low" | "medium" | "high";
   sandboxMode?: "workspace-write" | "read-only";
+  executionMode?: "accept-edits" | "plan";
+  useSandbox?: boolean;
+  bare?: boolean;
   jsonSchemaPath?: string;
   env?: Record<string, string>;
+  verbose?: boolean;
+  streamToConsole?: boolean;
+  consolePrefix?: string;
+  onStdoutChunk?: (chunk: string) => void;
+  onStderrChunk?: (chunk: string) => void;
+  preserveAgent?: boolean;
 }
 
 export interface ExecutionReceipt {
   runId: string;
   expertId: string;
   model: string;
-  effort: "low" | "medium" | "high";
+  effort: string;
   sandbox: string;
   durationMs: number;
   exitCode: number;
@@ -82,28 +92,72 @@ export class AgyDriver implements IAgyDriver {
   }
 
   public static resolveAgyBinary(): string {
-    if (process.env.OMA_AGY_BIN && existsSync(process.env.OMA_AGY_BIN)) {
-      return process.env.OMA_AGY_BIN;
+    const explicit = process.env.OMA_AGY_BIN?.trim();
+    if (explicit) {
+      return explicit;
     }
 
     const isWindows = process.platform === "win32";
+    const localAppData = process.env.LOCALAPPDATA;
+    const appData = process.env.APPDATA;
+    const userProfile = process.env.USERPROFILE;
+    const programFiles = process.env.ProgramFiles;
+    const wellKnownWindows = [
+      localAppData ? join(localAppData, "agy", "bin", "agy.exe") : undefined,
+      localAppData ? join(localAppData, "agy", "bin", "agy.cmd") : undefined,
+      appData ? join(appData, "npm", "gemini.cmd") : undefined,
+      appData ? join(appData, "npm", "gemini") : undefined,
+      userProfile ? join(userProfile, "AppData", "Local", "agy", "bin", "agy.exe") : undefined,
+      userProfile ? join(userProfile, "AppData", "Roaming", "npm", "gemini.cmd") : undefined,
+      programFiles ? join(programFiles, "Google", "Antigravity", "agy.exe") : undefined,
+      programFiles ? join(programFiles, "Antigravity", "agy.exe") : undefined,
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    if (isWindows) {
+      for (const wk of wellKnownWindows) {
+        if (isRealAgyBinary(wk)) {
+          try {
+            return realpathSync(wk);
+          } catch {
+            return wk;
+          }
+        }
+      }
+    }
+
     const candidates = isWindows
-      ? ["agy.exe", "agy", "gemini.cmd", "gemini"]
+      ? ["agy.exe", "agy.cmd", "gemini.cmd", "gemini.exe", "agy", "gemini"]
       : ["agy", "gemini"];
 
     for (const bin of candidates) {
       try {
-        const cmd = isWindows ? `where.exe "${bin}"` : `which "${bin}"`;
-        const found = execSync(cmd, { encoding: "utf8" }).trim().split(/\r?\n/)[0];
-        if (found && existsSync(found)) {
-          return found;
+        const proc = spawnSync(isWindows ? "where.exe" : "which", [bin], {
+          encoding: "utf8",
+          windowsHide: true,
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+        if (proc.status === 0 && proc.stdout) {
+          const lines = proc.stdout
+            .trim()
+            .split(/\r?\n/)
+            .map((l: string) => l.trim())
+            .filter(Boolean);
+
+          for (const found of lines) {
+            if (isRealAgyBinary(found)) {
+              try {
+                return realpathSync(found);
+              } catch {
+                return found;
+              }
+            }
+          }
         }
       } catch {
         // Continue
       }
     }
 
-    // Default fallback
     return isWindows ? "agy.exe" : "agy";
   }
 
@@ -115,6 +169,27 @@ export class AgyDriver implements IAgyDriver {
 
     const args = this.buildCliArguments(options, resolvedCap);
 
+    const isStreamingConsole =
+      options.streamToConsole ??
+      options.verbose ??
+      (process.env.OMA_VERBOSE === "true");
+
+    const consolePrefix = options.consolePrefix ?? `[OMA:${resolvedCap.expertId}]`;
+
+    const onStdoutChunk = (chunk: string) => {
+      options.onStdoutChunk?.(chunk);
+      if (isStreamingConsole) {
+        process.stdout.write(`  ${consolePrefix} ${chunk}`);
+      }
+    };
+
+    const onStderrChunk = (chunk: string) => {
+      options.onStderrChunk?.(chunk);
+      if (isStreamingConsole) {
+        process.stderr.write(`  ${consolePrefix}:err ${chunk}`);
+      }
+    };
+
     const processResult: ProcessRunResult = await this.processRunner.execute({
       executable: this.executablePath,
       args,
@@ -122,6 +197,9 @@ export class AgyDriver implements IAgyDriver {
       env: options.env,
       timeoutMs: options.timeoutMs,
       maxMemoryMb: this.maxMemoryMb,
+      onStdoutChunk,
+      onStderrChunk,
+      scrubber: this.scrubber,
     });
 
     const rawStdout = processResult.stdout;
@@ -132,7 +210,8 @@ export class AgyDriver implements IAgyDriver {
     const scrubbedStdoutHash = sha256(scrubbedStdout);
 
     // Extraction & parsing du JSON structuré
-    const { parsed, parseError } = this.extractStructuredOutput(rawStdout);
+    let { parsed, parseError } = this.extractStructuredOutput(rawStdout);
+    parsed = unwrapAgyResponse(parsed);
 
     // Classification du statut d'exécution
     let status: DriverStatus;
@@ -149,7 +228,11 @@ export class AgyDriver implements IAgyDriver {
       errorMessage = `Process failed to start or crashed: ${scrubbedStderr || processResult.stderr}`;
     } else if (processResult.exitCode !== 0) {
       status = "failed";
-      errorMessage = `Process exited with non-zero code ${processResult.exitCode}: ${scrubbedStderr || "Task failed"}`;
+      const parsedError =
+        typeof parsed === "object" && parsed !== null && "error" in parsed && typeof (parsed as Record<string, unknown>).error === "string"
+          ? String((parsed as Record<string, unknown>).error).trim()
+          : undefined;
+      errorMessage = `Process exited with non-zero code ${processResult.exitCode}: ${parsedError || scrubbedStderr || "Task failed"}`;
     } else {
       if (parsed !== undefined) {
         status = "success";
@@ -163,8 +246,8 @@ export class AgyDriver implements IAgyDriver {
     const rawReceipt = {
       runId,
       expertId: resolvedCap.expertId,
-      model: resolvedCap.modelSlug,
-      effort: resolvedCap.effort,
+      model: options.modelOverride ?? "agy-default",
+      effort: options.reasoningEffort ?? "agy-default",
       sandbox: resolvedCap.sandbox,
       durationMs: processResult.durationMs,
       exitCode: processResult.exitCode,
@@ -206,19 +289,56 @@ export class AgyDriver implements IAgyDriver {
     const args: string[] = [
       "-p",
       options.contractPrompt,
-      "--agent",
-      cap.agentName,
-      "--model",
-      cap.modelSlug,
       "--output-format",
       "json",
       "--add-dir",
       options.worktreeDir,
-      "--effort",
-      cap.effort,
-      "--sandbox",
-      options.sandboxMode ?? cap.sandbox,
     ];
+
+    if (options.modelOverride) {
+      args.splice(2, 0, "--model", cap.modelSlug);
+    }
+
+    const supportsEffort =
+      Boolean(options.modelOverride) &&
+      !cap.modelSlug.toLowerCase().includes("pro") &&
+      (cap.modelSlug.toLowerCase().includes("flash") ||
+        cap.modelSlug.toLowerCase().includes("thinking"));
+
+    if (options.reasoningEffort && supportsEffort) {
+      args.push("--effort", options.reasoningEffort);
+    }
+
+    args.push("--print-timeout", `${Math.max(1, Math.ceil(options.timeoutMs / 1000))}s`);
+
+    // Write-mode runs are non-interactive (`-p`) and must not name a custom `--agent`:
+    //   1. agy 1.1.x hangs indefinitely when a custom agent is combined with
+    //      `--mode accept-edits`, producing an empty diff until the watchdog kills it.
+    //      A bare invocation performs the same edit and returns cleanly. The worker's
+    //      real instructions travel in the prompt, so dropping `--agent` loses nothing.
+    //   2. Without auto-approval agy also blocks waiting for interactive permission on
+    //      each edit tool call. Safety is enforced at OMA's promotion layer (isolated
+    //      worktree, dual review, external gates); the sandbox bounds the auto-approval.
+    const autoApproveWrites = options.executionMode === "accept-edits";
+    const preserveAgent =
+      options.preserveAgent ??
+      (process.env.OMA_PRESERVE_AGENT === "true");
+
+    if (!options.bare && (!autoApproveWrites || preserveAgent)) {
+      args.splice(2, 0, "--agent", cap.agentName);
+    }
+
+    if (options.executionMode) {
+      args.push("--mode", options.executionMode);
+    }
+
+    if (autoApproveWrites) {
+      args.push("--dangerously-skip-permissions");
+    }
+
+    if (options.useSandbox || autoApproveWrites) {
+      args.push("--sandbox");
+    }
 
     if (options.jsonSchemaPath) {
       args.push("--json-schema", options.jsonSchemaPath);
@@ -308,4 +428,38 @@ export class AgyDriver implements IAgyDriver {
 
     return { parseError: "No valid JSON structure found in output" };
   }
+}
+
+export function unwrapAgyResponse(parsed: unknown): unknown {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return parsed;
+  const response = (parsed as Record<string, unknown>).response;
+  if (typeof response !== "string") return parsed;
+  try {
+    return JSON.parse(response) as unknown;
+  } catch {
+    return parsed;
+  }
+}
+
+function isRealAgyBinary(candidate: string): boolean {
+  if (!candidate) return false;
+  try {
+    if (!existsSync(candidate)) return false;
+  } catch {
+    return false;
+  }
+
+  const normalizedName = basename(candidate).toLocaleLowerCase("en-US");
+  if (process.platform === "win32") {
+    return (
+      normalizedName === "agy.exe" ||
+      normalizedName === "agy.cmd" ||
+      normalizedName === "gemini.cmd" ||
+      normalizedName === "gemini.exe" ||
+      normalizedName === "agy" ||
+      normalizedName === "gemini"
+    );
+  }
+
+  return normalizedName === "agy" || normalizedName === "gemini";
 }

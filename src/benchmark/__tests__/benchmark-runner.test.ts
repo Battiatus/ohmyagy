@@ -1,18 +1,19 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, beforeAll, afterAll } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BenchmarkRunner } from "../benchmark-runner.js";
+import { MockAgyDriver } from "../../runtime/mock-driver.js";
 
 describe("BenchmarkRunner Unit & Causal Validation Suite", () => {
   let testWorkspace: string;
 
-  before(() => {
+  beforeAll(() => {
     testWorkspace = mkdtempSync(join(tmpdir(), "oma-bench-test-"));
   });
 
-  after(() => {
+  afterAll(() => {
     try {
       rmSync(testWorkspace, { recursive: true, force: true });
     } catch {
@@ -25,6 +26,7 @@ describe("BenchmarkRunner Unit & Causal Validation Suite", () => {
     const { summary, rawResults, resultsFilePath } = await BenchmarkRunner.executeBenchmark({
       workspaceRoot: testWorkspace,
       trialsPerVariant: trialsCount,
+      driver: new MockAgyDriver(),
     });
 
     assert.equal(summary.taskId, "minimal-pipeline-causal-bench");

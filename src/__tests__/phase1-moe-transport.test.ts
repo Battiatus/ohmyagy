@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { describe, it } from "node:test";
+import { describe, it, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { installWorkspacePlugin } from "../packaging/install.js";
@@ -47,7 +47,7 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
   it("Gate 1.2: Capability Resolver resolves planner, worker, reviewer into concrete specs", () => {
     const plannerCap = CapabilityResolver.resolve("planner");
     assert.equal(plannerCap.agentName, "planner");
-    assert.equal(plannerCap.modelSlug, "gemini-3.7-pro");
+    assert.equal(plannerCap.modelSlug, "agy-default");
     assert.equal(plannerCap.effort, "high");
     assert.equal(plannerCap.sandbox, "read-only");
     assert.equal(plannerCap.readOnly, true);
@@ -55,7 +55,7 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
 
     const workerCap = CapabilityResolver.resolve("worker");
     assert.equal(workerCap.agentName, "worker");
-    assert.equal(workerCap.modelSlug, "gemini-3.7-flash");
+    assert.equal(workerCap.modelSlug, "agy-default");
     assert.equal(workerCap.effort, "medium");
     assert.equal(workerCap.sandbox, "workspace-write");
     assert.equal(workerCap.readOnly, false);
@@ -64,7 +64,7 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
 
     const reviewerCap = CapabilityResolver.resolve("reviewer");
     assert.equal(reviewerCap.agentName, "reviewer");
-    assert.equal(reviewerCap.modelSlug, "gemini-3.7-pro");
+    assert.equal(reviewerCap.modelSlug, "agy-default");
     assert.equal(reviewerCap.effort, "high");
     assert.equal(reviewerCap.readOnly, true);
   });
@@ -112,6 +112,7 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
       persona: "worker",
       worktreeDir: join(process.cwd(), ".oma", "worktrees", "task-1"),
       timeoutMs: 30000,
+      modelOverride: "gemini-2.5-flash",
       reasoningEffort: "high",
     });
 
@@ -120,7 +121,7 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
     assert.ok(args.includes("--agent"));
     assert.ok(args.includes("worker"));
     assert.ok(args.includes("--model"));
-    assert.ok(args.includes("gemini-3.7-flash"));
+    assert.ok(args.includes("gemini-2.5-flash"));
     assert.ok(args.includes("--effort"));
     assert.ok(args.includes("high"));
     assert.ok(args.includes("--output-format"));

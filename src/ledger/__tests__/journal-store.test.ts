@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import { JournalStore, JournalStoreError } from "../journal-store.js";
 import { GENESIS_HASH, verifyHashChain } from "../hash-chain.js";
 

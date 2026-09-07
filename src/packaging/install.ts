@@ -15,11 +15,14 @@ export interface WorkspacePluginInstall {
   hookPath: string;
   mcpServerPath: string;
   gatesPath: string;
+  agentsInstalled: string[];
+  skillsInstalled: string[];
 }
 
 export interface InstallOptions {
   gates?: Array<{ id: string; program: string; args: string[]; timeoutMs: number }>;
   force?: boolean;
+  global?: boolean;
 }
 
 export function installWorkspacePlugin(
@@ -62,6 +65,9 @@ export function installWorkspacePlugin(
   const gates = options.gates ?? [defaultNpmTestGate()];
   const gatesPath = join(pluginDir, "gates.json");
 
+  const agentsInstalled: string[] = [];
+  const skillsInstalled: string[] = [];
+
   try {
     writeJson(join(stagingDir, "plugin.json"), {
       $schema: "https://antigravity.google/schemas/v1/plugin.json",
@@ -88,11 +94,18 @@ export function installWorkspacePlugin(
     });
 
     writeJson(join(stagingDir, "gates.json"), { schemaVersion: 1, gates });
+    const mcpCommand = mcpServerPath.endsWith(".ts")
+      ? "bun"
+      : process.execPath.toLowerCase().includes("bun")
+      ? "bun"
+      : "node";
+    const mcpArgs = mcpServerPath.endsWith(".ts") ? ["run", mcpServerPath] : [mcpServerPath];
+
     writeJson(join(stagingDir, "mcp_config.json"), {
       mcpServers: {
         "oma-broker": {
-          command: process.execPath,
-          args: [mcpServerPath],
+          command: mcpCommand,
+          args: mcpArgs,
           cwd: workspace,
           env: {
             OMA_WORKSPACE_ROOT: workspace,
@@ -124,8 +137,13 @@ export function installWorkspacePlugin(
     deployCoreSkills(stagingDir);
 
     // Copy any assets from plugin-assets if available
-    const assetsDir = fileURLToPath(new URL("../plugin-assets", import.meta.url));
-    if (existsSync(assetsDir)) {
+    const candidatesAssets = [
+      fileURLToPath(new URL("../plugin-assets", import.meta.url)),
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../src/plugin-assets"),
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/plugin-assets"),
+    ];
+    const assetsDir = candidatesAssets.find((p) => existsSync(p));
+    if (assetsDir && existsSync(assetsDir)) {
       const sourceAgents = join(assetsDir, "agents");
       if (existsSync(sourceAgents)) {
         for (const file of readdirSync(sourceAgents)) {
@@ -138,19 +156,83 @@ export function installWorkspacePlugin(
       if (existsSync(sourceSkills)) {
         cpSync(sourceSkills, join(stagingDir, "skills"), { recursive: true });
       }
+      const sourceCommands = join(assetsDir, "commands");
+      if (existsSync(sourceCommands)) {
+        cpSync(sourceCommands, join(stagingDir, "commands"), { recursive: true });
+      }
     }
 
-    if (existsSync(pluginDir)) {
-      rmSync(pluginDir, { recursive: true, force: true });
+    mkdirSync(pluginDir, { recursive: true });
+    cpSync(stagingDir, pluginDir, { recursive: true, force: true });
+
+    // Deploy directly to .agents/agents and .agents/skills for native AntiGravity CLI discovery
+    const nativeAgentsDir = join(workspace, ".agents", "agents");
+    mkdirSync(nativeAgentsDir, { recursive: true });
+
+    // Clean up any legacy flat files (.agents/agents/*.md) to avoid directory/file collisions
+    for (const item of readdirSync(nativeAgentsDir)) {
+      if (item.endsWith(".md")) {
+        try {
+          rmSync(join(nativeAgentsDir, item), { force: true });
+        } catch {}
+      }
     }
-    mkdirSync(dirname(pluginDir), { recursive: true });
-    renameSync(stagingDir, pluginDir);
-  } catch (error) {
+
+    const agentsDir = join(stagingDir, "agents");
+    if (existsSync(agentsDir)) {
+      for (const file of readdirSync(agentsDir)) {
+        if (file.endsWith(".md")) {
+          const agentName = file.replace(/\.md$/, "");
+          // Folder: .agents/agents/{agent_name}/agent.md
+          const agentFolder = join(nativeAgentsDir, agentName);
+          mkdirSync(agentFolder, { recursive: true });
+          cpSync(join(agentsDir, file), join(agentFolder, "agent.md"), { force: true });
+          agentsInstalled.push(agentName);
+        }
+      }
+    }
+
+    const nativeSkillsDir = join(workspace, ".agents", "skills");
+    mkdirSync(nativeSkillsDir, { recursive: true });
+    const skillsDir = join(stagingDir, "skills");
+    if (existsSync(skillsDir)) {
+      for (const s of readdirSync(skillsDir)) {
+        const sourceSkill = join(skillsDir, s);
+        const targetSkill = join(nativeSkillsDir, s);
+        mkdirSync(targetSkill, { recursive: true });
+        cpSync(sourceSkill, targetSkill, { recursive: true, force: true });
+        skillsInstalled.push(s);
+      }
+    }
+
+    // Optional global installation into ~/.gemini/config/agents
+    if (options.global) {
+      const home = process.env.USERPROFILE || process.env.HOME;
+      if (home) {
+        const globalAgentsDir = join(home, ".gemini", "config", "agents");
+        mkdirSync(globalAgentsDir, { recursive: true });
+        if (existsSync(agentsDir)) {
+          for (const file of readdirSync(agentsDir)) {
+            if (file.endsWith(".md")) {
+              const agentName = file.replace(/\.md$/, "");
+              const globalAgentFolder = join(globalAgentsDir, agentName);
+              mkdirSync(globalAgentFolder, { recursive: true });
+              cpSync(join(agentsDir, file), join(globalAgentFolder, "agent.md"), { force: true });
+            }
+          }
+        }
+      }
+    }
+
     rmSync(stagingDir, { recursive: true, force: true });
+  } catch (error) {
+    try {
+      rmSync(stagingDir, { recursive: true, force: true });
+    } catch {}
     throw error;
   }
 
-  return { pluginDir, hookPath, mcpServerPath, gatesPath };
+  return { pluginDir, hookPath, mcpServerPath, gatesPath, agentsInstalled, skillsInstalled };
 }
 
 function deployCoreAgents(stagingDir: string): void {
@@ -160,11 +242,7 @@ function deployCoreAgents(stagingDir: string): void {
       content: [
         "---",
         "name: planner",
-        "role: Planner & Task Discovery Specialist",
-        "model: frontier",
-        "effort: high",
-        "readOnly: true",
-        "tools: [view_file, grep_search, find_by_name, list_dir]",
+        "description: OMA Planner and task discovery specialist",
         "---",
         "# OMA Planner",
         "Discovers and decomposes work items from goals, repository topology and objective judge diagnostics.",
@@ -176,11 +254,7 @@ function deployCoreAgents(stagingDir: string): void {
       content: [
         "---",
         "name: worker",
-        "role: Implementation & Targeted Execution Specialist",
-        "model: balanced",
-        "effort: medium",
-        "readOnly: false",
-        "tools: [view_file, grep_search, find_by_name, list_dir, write_to_file, replace_file_content, run_command]",
+        "description: OMA Worker for implementation and targeted execution",
         "---",
         "# OMA Worker",
         "Implements scoped code modifications within isolated worktrees.",
@@ -192,11 +266,7 @@ function deployCoreAgents(stagingDir: string): void {
       content: [
         "---",
         "name: reviewer",
-        "role: Adversarial Reviewer & Quality Auditor",
-        "model: frontier",
-        "effort: high",
-        "readOnly: true",
-        "tools: [view_file, grep_search, find_by_name, list_dir]",
+        "description: OMA Adversarial Reviewer for independent quality audits",
         "---",
         "# OMA Reviewer",
         "Performs independent adversarial audits on staged diffs and evidence.",
@@ -208,11 +278,7 @@ function deployCoreAgents(stagingDir: string): void {
       content: [
         "---",
         "name: fixer",
-        "role: Targeted Defect Resolution Specialist",
-        "model: balanced",
-        "effort: medium",
-        "readOnly: false",
-        "tools: [view_file, grep_search, find_by_name, list_dir, write_to_file, replace_file_content, run_command]",
+        "description: OMA Fixer for targeted defect resolution and repairs",
         "---",
         "# OMA Fixer",
         "Implements targeted fixes and surgical repairs derived from quality oracle diagnostics.",
@@ -248,6 +314,28 @@ function deployCoreSkills(stagingDir: string): void {
         "---",
         "# Quality Oracle",
         "Evaluates visible and hidden tests, progress vectors and acceptance verification.",
+      ].join("\n"),
+    },
+    {
+      name: "graph-recovery",
+      doc: [
+        "---",
+        "name: graph-recovery",
+        "description: Crash recovery and deterministic state reconstruction protocol for Oh My Antigravity (OMA)",
+        "---",
+        "# Graph Recovery",
+        "Reconstructs execution graph state and re-verifies invariant gates upon resumption.",
+      ].join("\n"),
+    },
+    {
+      name: "staged-review",
+      doc: [
+        "---",
+        "name: staged-review",
+        "description: 2-Phase Commit staged code review and promotion protocol for Oh My Antigravity (OMA)",
+        "---",
+        "# Staged Review",
+        "Enforces dual adversarial peer review and objective gate proof before promotion.",
       ].join("\n"),
     },
   ];

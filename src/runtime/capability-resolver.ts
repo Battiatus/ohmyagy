@@ -97,8 +97,7 @@ export class CapabilityResolver {
           }
         : spec;
 
-    const modelSlug =
-      overrides.modelOverride ?? this.DEFAULT_MODELS[expert.modelClass] ?? "gemini-3.7-flash";
+    const modelSlug = overrides.modelOverride ?? this.DEFAULT_MODELS[expert.modelClass];
     const effort = overrides.effortOverride ?? expert.effort;
     const sandbox = expert.readOnly ? "read-only" : "workspace-write";
 

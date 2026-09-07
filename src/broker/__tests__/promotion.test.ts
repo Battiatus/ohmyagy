@@ -10,13 +10,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import { evaluateStagedTransaction } from "../../oracle/executor.js";
 import { PromotionError, promoteApprovedTransaction } from "../promotion.js";
 import { snapshotCleanGitWorkspace, stageProposal } from "../staging.js";
 import { contentHash } from "../transaction.js";
 
-test("promotes an approved transaction as one fast-forward commit and cleans staging", () => {
+test("promotes an approved transaction as one fast-forward commit and cleans staging", { timeout: 30000 }, () => {
   const repo = createRepository();
   try {
     const source = snapshotCleanGitWorkspace(repo.root);
@@ -60,7 +60,7 @@ test("rejects a forged approval without touching a repository", () => {
   );
 });
 
-test("rejects stale source HEAD after approval and consumes the approval", () => {
+test("rejects stale source HEAD after approval and consumes the approval", { timeout: 30000 }, () => {
   const repo = createRepository();
   try {
     const source = snapshotCleanGitWorkspace(repo.root);

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -33,14 +34,26 @@ export class BenchmarkRunner {
     rawResults: BenchmarkTrialResult[];
     resultsFilePath: string;
   }> {
-    const { workspaceRoot, trialsPerVariant } = options;
+    const { workspaceRoot } = options;
+    const trialsPerVariant = options.trialsPerVariant ?? 3;
     const driver: IAgyDriver = options.driver ?? new AgyDriver();
     const worktreePool: IWorktreePool = options.worktreePool ?? new WorktreePool({ workspaceRoot });
     const benchmarkDir = join(workspaceRoot, ".oma", "benchmark");
     mkdirSync(benchmarkDir, { recursive: true });
 
+    let baselineSha = "commit-root-phase6";
+    try {
+      const gitOut = spawnSync("git", ["-C", workspaceRoot, "rev-parse", "HEAD"], {
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      if (gitOut.status === 0 && gitOut.stdout.trim().length === 40) {
+        baselineSha = gitOut.stdout.trim();
+      }
+    } catch {}
+
     const sharedBaseline: BenchmarkSharedBaseline = {
-      baselineCommitSha: "commit-root-phase6",
+      baselineCommitSha: options.baseline?.baselineCommitSha ?? baselineSha,
       taskPrompt: "Implement pipeline components with full test coverage and edge case resilience",
       modelSlug: options.baseline?.modelSlug ?? "gemini-3.7-flash",
       reasoningEffort: options.baseline?.reasoningEffort ?? "medium",

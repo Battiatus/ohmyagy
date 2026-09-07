@@ -59,6 +59,7 @@ export class MockAgyDriver implements IAgyDriver {
       status: "success",
       summary: "Default mock execution completed successfully.",
       artifacts: [],
+      diffContent: "diff --git a/src/index.ts b/src/index.ts\n+/* clean implementation */",
     };
     this.instantTimeout = options.instantTimeout ?? true;
   }

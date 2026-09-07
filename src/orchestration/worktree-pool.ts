@@ -35,8 +35,8 @@ export class WorktreePool implements IWorktreePool {
     this.worktreesDir = options.worktreesDir
       ? resolve(options.worktreesDir)
       : join(this.workspaceRoot, ".oma", "worktrees");
-    this.maxRetries = options.maxRetries ?? 5;
-    this.retryDelayMs = options.retryDelayMs ?? 100;
+    this.maxRetries = options.maxRetries ?? 2;
+    this.retryDelayMs = options.retryDelayMs ?? 20;
   }
 
   public getActiveWorktrees(): Map<string, string> {
@@ -52,11 +52,7 @@ export class WorktreePool implements IWorktreePool {
   }
 
   public isGitRepository(): boolean {
-    const check = spawnSync("git", ["-C", this.workspaceRoot, "rev-parse", "--is-inside-work-tree"], {
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    return check.status === 0;
+    return existsSync(join(this.workspaceRoot, ".git"));
   }
 
   public async acquire(taskId: string, baseRef: string = "HEAD"): Promise<string> {

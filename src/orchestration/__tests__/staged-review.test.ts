@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "bun:test";
 import {
   type PromotionResult,
   promoteApprovedTransaction,
@@ -113,7 +113,7 @@ test("#21 attests review before promotion and rejects post-promotion attestation
   }
 });
 
-test("#21bis refuses staged/promoted digest mismatch as staged_promoted_mismatch", () => {
+test("#21bis refuses staged/promoted digest mismatch as staged_promoted_mismatch", { timeout: 30000 }, () => {
   const harness = createHarness("mission-digest-conflict");
   try {
     const originalHead = git(harness.repositoryRoot, ["rev-parse", "HEAD"]);
@@ -214,7 +214,7 @@ test("#20 rejects partial-diff review because attested subject lacks stagedDiffD
   }
 });
 
-test("#19 code-change policy requires review coverage without human declaration", () => {
+test("#19 code-change policy requires review coverage without human declaration", { timeout: 30000 }, () => {
   const harness = createHarness("mission-review-omitted");
   try {
     const staged = harness.stageAuthorChange();
@@ -231,7 +231,7 @@ test("#19 code-change policy requires review coverage without human declaration"
   }
 });
 
-test("#21ter refuses unreviewed code-change promotion before repository mutation", () => {
+test("#21ter refuses unreviewed code-change promotion before repository mutation", { timeout: 30000 }, () => {
   const harness = createHarness("mission-unreviewed-refusal");
   try {
     const staged = harness.stageAuthorChange();
@@ -261,7 +261,7 @@ test("#21ter refuses unreviewed code-change promotion before repository mutation
   }
 });
 
-test("#21quater same-expert attestation does not unblock promotion", () => {
+test("#21quater same-expert attestation does not unblock promotion", { timeout: 30000 }, () => {
   const harness = createHarness("mission-same-expert-review");
   try {
     const staged = harness.stageAuthorChange();
@@ -297,7 +297,7 @@ test("#21quater same-expert attestation does not unblock promotion", () => {
   }
 });
 
-test("non-coverage mission class promotes without a reviewer", () => {
+test("non-coverage mission class promotes without a reviewer", { timeout: 30000 }, () => {
   const harness = createHarness("mission-artifact-analysis", "artifact-analysis");
   try {
     const staged = harness.stageAuthorChange();

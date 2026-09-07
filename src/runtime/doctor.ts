@@ -1,6 +1,7 @@
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { AgyDriver } from "./agy-driver.js";
 
 export interface DoctorReport {
   timestamp: string;
@@ -12,6 +13,7 @@ export interface DoctorReport {
     version?: string;
     supportedFlags: string[];
     error?: string;
+    diagnostics: string[];
   };
   bunCli: {
     available: boolean;
@@ -34,6 +36,8 @@ export interface DoctorReport {
     valid: boolean;
     agentsDetected: string[];
     skillsDetected: string[];
+    declaredAgents: string[];
+    declaredSkills: string[];
     diagnostics: string[];
   };
 }
@@ -45,154 +49,139 @@ export class OmaDoctor {
     // 1. Detect Git
     let gitInfo = { available: false, path: undefined as string | undefined, version: undefined as string | undefined };
     try {
-      const gitPath = isWindows
-        ? execSync("where.exe git", { encoding: "utf8" }).trim().split(/\r?\n/)[0]
-        : execSync("which git", { encoding: "utf8" }).trim();
-      const gitVer = execSync("git --version", { encoding: "utf8" }).trim();
-      gitInfo = { available: true, path: gitPath, version: gitVer };
-    } catch {
-      // Git unavailable
-    }
+      const gitRes = spawnSync("git", ["--version"], { encoding: "utf8", windowsHide: true, timeout: 1000 });
+      if (gitRes.status === 0 && gitRes.stdout) {
+        gitInfo = { available: true, path: "git", version: gitRes.stdout.trim() };
+      }
+    } catch {}
 
     // 2. Detect Bun
     let bunInfo = { available: false, path: undefined as string | undefined, version: undefined as string | undefined };
     try {
-      const bunPath = isWindows
-        ? execSync("where.exe bun", { encoding: "utf8" }).trim().split(/\r?\n/)[0]
-        : execSync("which bun", { encoding: "utf8" }).trim();
-      const bunVer = execSync("bun --version", { encoding: "utf8" }).trim();
-      bunInfo = { available: true, path: bunPath, version: bunVer };
-    } catch {
-      // Bun unavailable
-    }
+      const bunRes = spawnSync("bun", ["--version"], { encoding: "utf8", windowsHide: true, timeout: 1000 });
+      if (bunRes.status === 0 && bunRes.stdout) {
+        bunInfo = { available: true, path: "bun", version: bunRes.stdout.trim() };
+      }
+    } catch {}
 
     // 3. Detect Node
     let nodeInfo = { available: false, path: undefined as string | undefined, version: undefined as string | undefined };
     try {
       nodeInfo = { available: true, path: process.execPath, version: process.version };
-    } catch {
-      // Node unavailable
-    }
+    } catch {}
 
     // 4. Detect AntiGravity (agy / agy.exe / gemini)
     let agyInfo: DoctorReport["agyCli"] = {
       available: false,
       supportedFlags: [],
+      diagnostics: [],
     };
 
-    const agyBinCandidates = [
-      process.env.OMA_AGY_BIN,
-      "agy.exe",
-      "agy",
-      "agy.cmd",
-      "gemini.exe",
-      "gemini.cmd",
-      "gemini",
-    ].filter(Boolean) as string[];
-
-    for (const candidate of agyBinCandidates) {
+    const resolvedAgy = AgyDriver.resolveAgyBinary();
+    if (resolvedAgy && existsSync(resolvedAgy) && isActualAgyExecutable(resolvedAgy)) {
+      agyInfo.path = resolvedAgy;
       try {
-        const checkCmd = isWindows ? `where.exe "${candidate}"` : `which "${candidate}"`;
-        const resolvedPath = execSync(checkCmd, { encoding: "utf8" }).trim().split(/\r?\n/)[0];
-        if (resolvedPath && existsSync(resolvedPath)) {
-          agyInfo.path = resolvedPath;
-          agyInfo.available = true;
-
-          // Attempt --version
-          try {
-            const verOut = execSync(`"${resolvedPath}" --version`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-            agyInfo.version = verOut;
-          } catch {
-            agyInfo.version = "unknown";
-          }
-
-          // Attempt --help to detect flags
-          try {
-            const helpOut = execSync(`"${resolvedPath}" --help`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-            const flags = ["--agent", "-p", "--output-format", "--effort", "--sandbox", "--json-schema", "--model"];
-            agyInfo.supportedFlags = flags.filter((f) => helpOut.includes(f));
-          } catch {
-            agyInfo.supportedFlags = ["-p", "--agent", "--output-format", "--effort", "--sandbox", "--model"];
-          }
-
-          break;
+        const verProc = spawnSync(resolvedAgy, ["--version"], {
+          encoding: "utf8",
+          windowsHide: true,
+          timeout: 5_000,
+        });
+        if (verProc.status === 0 && verProc.stdout.trim()) {
+          agyInfo.version = verProc.stdout.trim();
+        } else {
+          agyInfo.diagnostics.push(`agy --version failed: ${String(verProc.stderr ?? "").trim() || `exit ${String(verProc.status)}`}`);
         }
       } catch {
-        // Try next candidate
+        agyInfo.diagnostics.push("agy --version could not be executed");
       }
+
+      try {
+        const helpProc = spawnSync(resolvedAgy, ["--help"], {
+          encoding: "utf8",
+          windowsHide: true,
+          timeout: 5_000,
+        });
+        if (helpProc.status === 0) {
+          const helpOut = `${helpProc.stdout ?? ""}\n${helpProc.stderr ?? ""}`;
+          const flags = ["--agent", "-p", "--output-format", "--effort", "--add-dir", "--print-timeout", "--model", "--mode"];
+          agyInfo.supportedFlags = flags.filter((flag) => helpOut.includes(flag));
+          const missingFlags = flags.filter((flag) => !agyInfo.supportedFlags.includes(flag));
+          if (missingFlags.length > 0) {
+            agyInfo.diagnostics.push(`agy --help is missing required flags: ${missingFlags.join(", ")}`);
+          }
+        } else {
+          agyInfo.diagnostics.push(`agy --help failed: ${String(helpProc.stderr ?? "").trim() || `exit ${String(helpProc.status)}`}`);
+        }
+      } catch {
+        agyInfo.diagnostics.push("agy --help could not be executed");
+      }
+    } else {
+      agyInfo.error = `Resolved AntiGravity executable is unavailable or not agy.exe: ${resolvedAgy}`;
     }
 
-    if (!agyInfo.available) {
-      agyInfo.error = "AntiGravity CLI executable not found in PATH. Provide OMA_AGY_BIN or ensure agy is installed.";
-      agyInfo.supportedFlags = ["-p", "--agent", "--output-format", "--effort", "--sandbox", "--model"];
-    }
+    agyInfo.available = Boolean(agyInfo.path && existsSync(agyInfo.path) && !agyInfo.error);
 
     // 5. Plugin Discovery & Live AGY Attestation
     const pluginDir = join(workspaceRoot, ".agents", "plugins", "oma");
     const pluginInstalled = existsSync(pluginDir);
     const agentsDetected: string[] = [];
     const skillsDetected: string[] = [];
+    const declaredAgents: string[] = [];
+    const declaredSkills: string[] = [];
     const diagnostics: string[] = [];
+    const coreAgentsRequired = ["planner", "worker", "reviewer", "fixer"];
 
-    // Query AGY CLI live for agents and plugins
     if (pluginInstalled) {
-      if (agyInfo.available && agyInfo.path) {
-        try {
-          const agentsOutput = execSync(`"${agyInfo.path}" agents`, {
-            encoding: "utf8",
-            stdio: ["ignore", "pipe", "ignore"],
-          });
-          for (const line of agentsOutput.split(/\r?\n/)) {
-            const match = line.match(/^\s*-\s*([a-zA-Z0-9_-]+)/);
-            if (match && match[1]) {
-              agentsDetected.push(match[1]);
-            }
-          }
-        } catch (e) {
-          diagnostics.push(`Failed to query live agents from AGY CLI: ${e instanceof Error ? e.message : String(e)}`);
-        }
-
-        try {
-          const pluginOutput = execSync(`"${agyInfo.path}" plugin list`, {
-            encoding: "utf8",
-            stdio: ["ignore", "pipe", "ignore"],
-          });
-          if (!pluginOutput.includes("oma")) {
-            diagnostics.push("OMA plugin is not listed in live `agy plugin list` output");
-          }
-          if (pluginOutput.includes("dynamic-workflow")) skillsDetected.push("dynamic-workflow");
-          if (pluginOutput.includes("quality-oracle")) skillsDetected.push("quality-oracle");
-        } catch (e) {
-          diagnostics.push(`Failed to query live plugins from AGY CLI: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
       const pluginJsonPath = join(pluginDir, "plugin.json");
       if (!existsSync(pluginJsonPath)) {
         diagnostics.push("plugin.json missing in installed plugin directory");
       }
+
       const agentsDir = join(pluginDir, "agents");
       if (existsSync(agentsDir)) {
         try {
           for (const f of readdirSync(agentsDir).filter((file: string) => file.endsWith(".md"))) {
             const name = f.replace(/\.md$/, "");
-            if (!agentsDetected.includes(name)) agentsDetected.push(name);
-          }
-        } catch {}
-      }
-      const skillsDir = join(pluginDir, "skills");
-      if (existsSync(skillsDir)) {
-        try {
-          for (const s of readdirSync(skillsDir)) {
-            if (!skillsDetected.includes(s)) skillsDetected.push(s);
+            if (!declaredAgents.includes(name)) declaredAgents.push(name);
           }
         } catch {}
       }
 
-      const coreAgentsRequired = ["planner", "worker", "reviewer", "fixer"];
+      const skillsDir = join(pluginDir, "skills");
+      if (existsSync(skillsDir)) {
+        try {
+          for (const s of readdirSync(skillsDir)) {
+            if (!declaredSkills.includes(s)) declaredSkills.push(s);
+          }
+        } catch {}
+      }
+
       for (const req of coreAgentsRequired) {
-        if (!agentsDetected.includes(req)) {
-          diagnostics.push(`Core agent persona '${req}' missing from detected agents`);
+        if (!declaredAgents.includes(req)) {
+          diagnostics.push(`Core agent persona '${req}' is missing from the workspace plugin`);
+        }
+      }
+
+      // Attest deployed agents in workspace (.agents/agents/{agent}/agent.md) or pluginDir
+      const nativeAgentsDir = join(workspaceRoot, ".agents", "agents");
+      for (const req of coreAgentsRequired) {
+        const nativeFolder = join(nativeAgentsDir, req, "agent.md");
+        const nativeFlat = join(nativeAgentsDir, `${req}.md`);
+        const pluginFile = join(pluginDir, "agents", `${req}.md`);
+        if (existsSync(nativeFolder) || existsSync(nativeFlat) || existsSync(pluginFile)) {
+          agentsDetected.push(req);
+        } else {
+          diagnostics.push(`Core agent persona '${req}' is missing from the workspace plugin`);
+        }
+      }
+
+      // Attest deployed skills in workspace (.agents/skills/{skill}/SKILL.md) or pluginDir
+      const nativeSkillsDir = join(workspaceRoot, ".agents", "skills");
+      for (const skill of declaredSkills) {
+        const nativeSkill = join(nativeSkillsDir, skill, "SKILL.md");
+        const pluginSkill = join(pluginDir, "skills", skill, "SKILL.md");
+        if (existsSync(nativeSkill) || existsSync(pluginSkill)) {
+          skillsDetected.push(skill);
         }
       }
     } else {
@@ -210,11 +199,33 @@ export class OmaDoctor {
       pluginDiscovery: {
         installed: pluginInstalled,
         pluginPath: pluginInstalled ? pluginDir : undefined,
-        valid: pluginInstalled && diagnostics.length === 0,
+        valid: pluginInstalled && diagnostics.length === 0 && agentsDetected.length >= coreAgentsRequired.length,
         agentsDetected: Array.from(new Set(agentsDetected)),
         skillsDetected: Array.from(new Set(skillsDetected)),
+        declaredAgents: Array.from(new Set(declaredAgents)),
+        declaredSkills: Array.from(new Set(declaredSkills)),
         diagnostics,
       },
     };
   }
+}
+
+function isActualAgyExecutable(filePath: string): boolean {
+  if (!filePath) return false;
+  const name = basename(filePath).toLocaleLowerCase("en-US");
+  if (process.platform === "win32") {
+    return (
+      name === "agy.exe" ||
+      name === "agy.cmd" ||
+      name === "gemini.cmd" ||
+      name === "gemini.exe" ||
+      name === "agy" ||
+      name === "gemini"
+    );
+  }
+  return name === "agy" || name === "gemini";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

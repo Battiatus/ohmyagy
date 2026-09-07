@@ -1,18 +1,19 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, beforeAll, afterAll } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runOmaCli } from "../oma-cli.js";
+import { MissionEventsStore } from "../../ledger/mission-events.js";
 
 describe("OMA CLI Comprehensive Test Suite", () => {
   let testWorkspace: string;
 
-  before(() => {
+  beforeAll(() => {
     testWorkspace = mkdtempSync(join(tmpdir(), "oma-cli-test-"));
   });
 
-  after(() => {
+  afterAll(() => {
     try {
       rmSync(testWorkspace, { recursive: true, force: true });
     } catch {
@@ -39,6 +40,8 @@ describe("OMA CLI Comprehensive Test Suite", () => {
     const pluginDir = join(testWorkspace, ".agents", "plugins", "oma");
     assert.ok(existsSync(pluginDir));
     assert.ok(existsSync(join(pluginDir, "plugin.json")));
+    assert.ok(existsSync(join(pluginDir, "skills", "oma-start", "SKILL.md")));
+    assert.ok(existsSync(join(pluginDir, "skills", "oma-watch", "SKILL.md")));
 
     // 2. Second installation without --force should fail cleanly with code 1
     const code2 = await runOmaCli(["plugin", "install-workspace"], testWorkspace);
@@ -66,39 +69,75 @@ describe("OMA CLI Comprehensive Test Suite", () => {
     }
   });
 
-  it("executes full mission lifecycle: run -> status -> inspect -> resume", async () => {
-    const missionId = `cli-e2e-${Date.now()}`;
+  it("recognizes the start and watch user entry points", async () => {
+    assert.equal(await runOmaCli(["start"], testWorkspace), 1);
 
-    // 1. Run mission
-    const runCode = await runOmaCli(["run", missionId], testWorkspace);
-    assert.equal(runCode, 0);
+    const missionId = `watch-${Date.now()}`;
+    const eventsPath = join(testWorkspace, ".oma", "missions", missionId, "events.jsonl");
+    MissionEventsStore.appendEvent(eventsPath, missionId, {
+      type: "mission_started",
+      workflowDigest: "watch-test",
+      rulebookRevision: "watch-test",
+      goal: "Observe a mission without executing one.",
+    });
+    MissionEventsStore.appendEvent(eventsPath, missionId, {
+      type: "run_started",
+      runId: `run-planner-${missionId}`,
+      workItemId: "planner",
+      expertId: "planner",
+      model: "default",
+      effort: "agy-default",
+    });
 
-    // 2. Status formatted and JSON
-    const statusCode1 = await runOmaCli(["status", "--mission", missionId], testWorkspace);
-    assert.equal(statusCode1, 0);
+    let output = "";
+    const originalLog = console.log;
+    console.log = (value: string) => {
+      output += `${value}\n`;
+    };
+    try {
+      assert.equal(await runOmaCli(["watch", "--mission", missionId, "--once"], testWorkspace), 0);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.match(output, new RegExp(`OMA Mission Status: ${missionId}`));
+    assert.match(output, /Phase: PLANNING/u);
+    assert.match(output, /Active Runs: \[planner:planner\]/u);
+    assert.match(output, /Progress: plan pending, 1 active run\(s\)/u);
 
-    const statusCode2 = await runOmaCli(["status", "--json", "--mission", missionId], testWorkspace);
-    assert.equal(statusCode2, 0);
+    assert.equal(await runOmaCli(["watch", `--${missionId}`, "--once"], testWorkspace), 1);
+    assert.equal(await runOmaCli(["watch", "--mission=", "--once"], testWorkspace), 1);
 
-    // 3. Inspect formatted and JSON
-    const inspectCode1 = await runOmaCli(["inspect", "--mission", missionId], testWorkspace);
-    assert.equal(inspectCode1, 0);
-
-    const inspectCode2 = await runOmaCli(["inspect", "--json", "--mission", missionId], testWorkspace);
-    assert.equal(inspectCode2, 0);
-
-    // 4. Resume mission
-    const resumeCode = await runOmaCli(["resume", "--mission", missionId], testWorkspace);
-    assert.equal(resumeCode, 0);
+    MissionEventsStore.appendEvent(eventsPath, missionId, {
+      type: "mission_finished",
+      finalStatus: "succeeded",
+      totalDurationMs: 1,
+      finalProgress: {
+        hiddenTestsFailing: 0,
+        hiddenTestsPassed: 0,
+        visibleTestsFailing: 0,
+        visibleTestsPassed: 0,
+        gateFailures: 0,
+        openDiagnosticsCount: 0,
+        acceptedWorkItems: 0,
+        totalWorkItems: 0,
+      },
+    });
+    assert.equal(await runOmaCli(["watch", "--once"], testWorkspace), 1);
   });
 
-  it("executes benchmark via CLI and persists metrics", async () => {
-    const code = await runOmaCli(["benchmark", "--trials", "1"], testWorkspace);
-    assert.equal(code, 0);
+  it("refuses a synthetic mission lifecycle without a gate manifest and a verified runtime", async () => {
+    const missionId = `cli-e2e-${Date.now()}`;
 
-    const benchDir = join(testWorkspace, ".oma", "benchmark");
-    assert.ok(existsSync(benchDir));
-    assert.ok(existsSync(join(benchDir, "causal_benchmark_report.md")));
+    const runCode = await runOmaCli(["run", missionId], testWorkspace);
+    assert.equal(runCode, 1);
+    assert.equal(existsSync(join(testWorkspace, ".oma", "missions", missionId, "events.jsonl")), false);
+    assert.equal(await runOmaCli(["resume", "--mission", missionId], testWorkspace), 1);
+  });
+
+  it("refuses a benchmark without an explicit pinned manifest", async () => {
+    const code = await runOmaCli(["benchmark", "--trials", "1"], testWorkspace);
+    assert.equal(code, 1);
+    assert.equal(existsSync(join(testWorkspace, ".oma", "benchmark", "causal_benchmark_report.md")), false);
   });
 
   it("returns error code 1 for unknown command", async () => {

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import test, { describe, it } from "node:test";
+import { describe, it, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { BenchmarkRunner } from "../benchmark/benchmark-runner.js";
+import { MockAgyDriver } from "../runtime/mock-driver.js";
 
 describe("Phase 6 — Benchmark Causal (Gate Observable)", () => {
   it("Gate 6.1, 6.2 & 6.3: Automated paired & repeated benchmark across 4 frozen variants produces causal conclusions", { timeout: 180_000 }, async () => {
@@ -15,6 +16,7 @@ describe("Phase 6 — Benchmark Causal (Gate Observable)", () => {
       const { summary, rawResults, resultsFilePath } = await BenchmarkRunner.executeBenchmark({
         workspaceRoot: testDir,
         trialsPerVariant,
+        driver: new MockAgyDriver(),
         baseline: {
           modelSlug: "gemini-3.7-flash",
           reasoningEffort: "medium",

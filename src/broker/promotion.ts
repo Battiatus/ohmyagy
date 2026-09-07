@@ -174,13 +174,14 @@ export function promoteApprovedTransaction(
     }
 
     const promoted = snapshotCleanGitWorkspace(staged.repositoryRoot);
+    const promotedStateHash = hashJson(promoted.files);
     if (
       promoted.version !== promotedVersion ||
-      hashJson(promoted.files) !== staged.transaction.nextVersion
+      promotedStateHash !== staged.transaction.nextVersion
     ) {
       throw new PromotionError(
         "postcondition_failed",
-        "Promoted Git state does not match the accepted transaction state.",
+        `Promoted Git state does not match the accepted transaction state: expected=${staged.transaction.nextVersion}, actual=${promotedStateHash}.`,
       );
     }
     discardStagedTransaction(staged);
@@ -234,7 +235,15 @@ function runGitAllowFailure(
     windowsHide: true,
     maxBuffer: 10 * 1024 * 1024,
     input: options.input,
-    env: { ...process.env, ...options.env },
+    env: {
+      ...process.env,
+      GIT_PAGER: "cat",
+      PAGER: "cat",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_OPTIONAL_LOCKS: "0",
+      ...options.env,
+    },
+    timeout: 10000,
   });
   return {
     status: result.status ?? 1,
