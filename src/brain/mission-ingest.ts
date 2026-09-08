@@ -179,7 +179,7 @@ export function ingestMissionIntoBrain(options: IngestMissionOptions): IngestMis
 
     // 5. Ingest work item nodes -> run_summary and interaction_summaries
     if (projection?.workGraph?.workItems) {
-      let roundCounter = options.roundNumber ?? brain.listInteractions(sessionId).length;
+      let roundCounter = options.roundNumber ?? brain.getNextRoundNumber(sessionId);
       for (const [nodeId, item] of Object.entries(projection.workGraph.workItems)) {
         const nodeRef = item.id || nodeId;
 
@@ -238,7 +238,7 @@ export function ingestMissionIntoBrain(options: IngestMissionOptions): IngestMis
     if (options.graph) {
       try {
         const graphProjection = projectGraph(options.graph, options.graphEvents ?? []);
-        let roundCounter = options.roundNumber ?? brain.listInteractions(sessionId).length;
+        let roundCounter = options.roundNumber ?? brain.getNextRoundNumber(sessionId);
         for (const node of graphProjection.nodes) {
           const nodeRef = node.id;
           const originalNode = options.graph.nodes.find((n) => n.id === node.id);
@@ -369,13 +369,20 @@ export function ingestMissionIntoBrain(options: IngestMissionOptions): IngestMis
     // 8. Auto-compaction after mission ingestion in fail-open mode
     let compaction: CompactionResult | undefined;
     if (options.autoCompact !== false) {
-      try {
-        compaction = brain.compact({
-          projectId,
-          ...options.compactionOptions,
-        });
-      } catch {
-        // Fail-open: compaction failure must never fail mission ingestion
+      const shouldCompact =
+        options.autoCompactInterval === undefined ||
+        options.autoCompactInterval <= 0 ||
+        (interactionsRecorded > 0 && interactionsRecorded % options.autoCompactInterval === 0);
+
+      if (shouldCompact) {
+        try {
+          compaction = brain.compact({
+            projectId,
+            ...options.compactionOptions,
+          });
+        } catch {
+          // Fail-open: compaction failure must never fail mission ingestion
+        }
       }
     }
 

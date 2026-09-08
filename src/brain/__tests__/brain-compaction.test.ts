@@ -612,5 +612,188 @@ describe("Phase 7: BrainStore Compaction & Lifecycle (T7.1 & T7.2)", () => {
         `Database file size should remain bounded, but was ${stats.size} bytes`,
       );
     });
+
+    it("prunes all run summaries when maxRunSummaries is explicitly 0", () => {
+      const proj = brain.ensureProject({ name: "zero-run-test", rootPath: "/test/zero-run" });
+      brain.storeMemory({
+        projectId: proj.id,
+        dimension: "run_summary",
+        title: "Wave A",
+        content: "Completed A",
+        confidence: 0.9,
+      });
+      brain.storeMemory({
+        projectId: proj.id,
+        dimension: "architectural_decision",
+        title: "Arch Choice",
+        content: "Durable decision",
+        confidence: 0.9,
+      });
+
+      const res = brain.compact({ projectId: proj.id, maxRunSummaries: 0 });
+      assert.equal(res.runSummariesPruned, 1);
+      assert.equal(brain.queryMemory({ projectId: proj.id, dimensions: ["run_summary"] }).length, 0);
+      assert.equal(brain.queryMemory({ projectId: proj.id, dimensions: ["architectural_decision"] }).length, 1);
+    });
+
+    it("prunes all interactions when maxInteractionsPerSession is explicitly 0", () => {
+      const proj = brain.ensureProject({ name: "zero-inter-test", rootPath: "/test/zero-inter" });
+      const session = brain.startSession({ projectId: proj.id });
+      brain.recordInteraction({
+        sessionId: session.id,
+        roundNumber: 0,
+        context: "Context",
+        actions: "Actions",
+      });
+
+      const res = brain.compact({ projectId: proj.id, maxInteractionsPerSession: 0, condenseInteractions: false });
+      assert.equal(res.interactionsPruned, 1);
+      assert.equal(brain.listInteractions(session.id).length, 0);
+    });
+
+    it("merges tags across duplicate entries into the retained entry during compaction", () => {
+      const proj = brain.ensureProject({ name: "tag-merge-test", rootPath: "/test/tag-merge" });
+      brain.storeMemory({
+        projectId: proj.id,
+        dimension: "run_summary",
+        title: "Same Title",
+        content: "Same Content",
+        tags: ["tag1", "common"],
+        confidence: 0.8,
+      });
+      brain.storeMemory({
+        projectId: proj.id,
+        dimension: "run_summary",
+        title: "Same Title",
+        content: "Same Content",
+        tags: ["tag2", "common", "node:node-1"],
+        confidence: 0.9,
+      });
+
+      const res = brain.compact({ projectId: proj.id });
+      assert.equal(res.entriesDeduplicated, 1);
+
+      const remaining = brain.queryMemory({ projectId: proj.id, dimensions: ["run_summary"] });
+      assert.equal(remaining.length, 1);
+      assert.ok(remaining[0].tags.includes("tag1"));
+      assert.ok(remaining[0].tags.includes("tag2"));
+      assert.ok(remaining[0].tags.includes("common"));
+      assert.ok(remaining[0].tags.includes("node:node-1"));
+    });
+
+    it("flattens successive condensations without nesting [Condensed ...] headers and tracks total rounds", () => {
+      const proj = brain.ensureProject({ name: "recondense-test", rootPath: "/test/recondense" });
+      const session = brain.startSession({ projectId: proj.id });
+
+      // First wave: rounds 0..3
+      for (let r = 0; r < 4; r++) {
+        brain.recordInteraction({
+          sessionId: session.id,
+          roundNumber: r,
+          context: `Goal ${r}`,
+          actions: `Action ${r}`,
+          outcome: `Outcome ${r}`,
+          nodeRef: `node-${r}`,
+        });
+      }
+
+      // Compact: keep 1 freshest, condense 3 oldest
+      brain.compact({
+        projectId: proj.id,
+        maxInteractionsPerSession: 1,
+        condenseInteractions: true,
+      });
+
+      let interactions = brain.listInteractions(session.id);
+      assert.equal(interactions.length, 2); // 1 condensed + round 3
+      assert.ok(interactions[0].userIntent?.includes("[Condensed 3 rounds: 0..2]"));
+
+      // Second wave: add rounds 4 and 5
+      brain.recordInteraction({
+        sessionId: session.id,
+        roundNumber: 4,
+        context: "Goal 4",
+        actions: "Action 4",
+        outcome: "Outcome 4",
+        nodeRef: "node-4",
+      });
+      brain.recordInteraction({
+        sessionId: session.id,
+        roundNumber: 5,
+        context: "Goal 5",
+        actions: "Action 5",
+        outcome: "Outcome 5",
+        nodeRef: "node-5",
+      });
+
+      // Total in session now: [condensed(0..2), round 3, round 4, round 5] = 4 rows
+      // Re-compact: keep 1 freshest (round 5), condense oldest 3 (condensed(0..2), round 3, round 4)
+      brain.compact({
+        projectId: proj.id,
+        maxInteractionsPerSession: 1,
+        condenseInteractions: true,
+      });
+
+      interactions = brain.listInteractions(session.id);
+      assert.equal(interactions.length, 2); // 1 recondensed + round 5
+      const recondensed = interactions[0];
+
+      // Must accurately track 5 total historical rounds (0..4)
+      assert.ok(recondensed.userIntent?.includes("[Condensed 5 rounds: 0..4]"));
+      // Must NOT contain nested duplicate headers
+      const headerMatches = recondensed.userIntent?.match(/\[Condensed/g) || [];
+      assert.equal(headerMatches.length, 1);
+      assert.equal(interactions[1].roundNumber, 5);
+
+      // getNextRoundNumber must correctly return 6 (not 2!)
+      assert.equal(brain.getNextRoundNumber(session.id), 6);
+    });
+
+    it("listInteractions and listInteractionsByNode correctly match nodeRef inside condensed rollups", () => {
+      const proj = brain.ensureProject({ name: "node-filter-test", rootPath: "/test/node-filter" });
+      const session = brain.startSession({ projectId: proj.id });
+
+      brain.recordInteraction({
+        sessionId: session.id,
+        roundNumber: 0,
+        context: "Task A",
+        actions: "Execute A",
+        nodeRef: "node-alpha",
+      });
+      brain.recordInteraction({
+        sessionId: session.id,
+        roundNumber: 1,
+        context: "Task B",
+        actions: "Execute B",
+        nodeRef: "node-beta",
+      });
+      brain.recordInteraction({
+        sessionId: session.id,
+        roundNumber: 2,
+        context: "Task C",
+        actions: "Execute C",
+        nodeRef: "node-gamma",
+      });
+
+      // Condense rounds 0 and 1
+      brain.compact({
+        projectId: proj.id,
+        maxInteractionsPerSession: 1,
+        condenseInteractions: true,
+      });
+
+      // Querying by node-alpha must find the condensed interaction summary
+      const alphaInteractions = brain.listInteractions(session.id, "node-alpha");
+      assert.equal(alphaInteractions.length, 1);
+      assert.ok(alphaInteractions[0].id.startsWith("condensed-"));
+
+      const betaByNode = brain.listInteractionsByNode("node-beta");
+      assert.equal(betaByNode.length, 1);
+      assert.ok(betaByNode[0].id.startsWith("condensed-"));
+
+      // Negative check: unrelated node does not match
+      const deltaInteractions = brain.listInteractions(session.id, "node-delta");
+      assert.equal(deltaInteractions.length, 0);
+    });
   });
 });

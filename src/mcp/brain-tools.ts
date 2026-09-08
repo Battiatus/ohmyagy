@@ -160,6 +160,10 @@ export const BRAIN_TOOL_DEFINITIONS = [
           enum: ["exact", "redundant"],
           description: "Deduplication strategy: exact or redundant (retains freshest/highest confidence). Default: redundant.",
         },
+        vacuum: {
+          type: "boolean",
+          description: "Whether to execute SQLite VACUUM to reclaim space after pruning. Default: true.",
+        },
       },
     },
   },
@@ -360,6 +364,8 @@ function executeCompact(
       input.deduplicationMode === "exact" || input.deduplicationMode === "redundant"
         ? input.deduplicationMode
         : undefined,
+    vacuum:
+      typeof input.vacuum === "boolean" ? input.vacuum : undefined,
   });
   return {
     ...result,

@@ -96,7 +96,7 @@ export async function captureInteraction(params: {
   }
 
   try {
-    const roundNumber = brain.listInteractions(sessionId).length;
+    const roundNumber = brain.getNextRoundNumber(sessionId);
 
     let interactionId: string;
     let memoryId: string | undefined;

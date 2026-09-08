@@ -315,3 +315,11 @@ test("brain_compact supports condenseInteractions", () => {
   assert.ok(interactions.some((i) => i.userIntent?.includes("[Condensed")));
 });
 
+test("brain_compact accepts vacuum parameter", () => {
+  const { structured, isError } = callTool("brain_compact", {
+    vacuum: false,
+  });
+  assert.equal(isError, false);
+  assert.equal(structured.status, "compacted");
+});
+
