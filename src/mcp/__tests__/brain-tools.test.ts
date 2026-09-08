@@ -74,17 +74,22 @@ afterEach(() => {
   removeTree(root);
 });
 
-test("tools/list advertises the three brain tools with schemas", () => {
+test("tools/list advertises the four brain tools with schemas", () => {
   const result = rpc("tools/list");
   const tools = result.tools as Array<{ name: string; inputSchema: unknown }>;
   const names = tools.map((t) => t.name);
   assert.ok(names.includes("brain_store"));
   assert.ok(names.includes("brain_query"));
   assert.ok(names.includes("brain_summarize"));
+  assert.ok(names.includes("brain_compact"));
   const store = tools.find((t) => t.name === "brain_store");
   assert.ok(store);
   assert.equal(typeof store.inputSchema, "object");
+  const compactTool = tools.find((t) => t.name === "brain_compact");
+  assert.ok(compactTool);
+  assert.equal(typeof compactTool.inputSchema, "object");
 });
+
 
 test("brain_store persists a memory scoped to the current workspace project", () => {
   const { structured, isError } = callTool("brain_store", {
@@ -201,3 +206,112 @@ test("brain_summarize records canonical context, actions, and nodeRef", () => {
   assert.equal(interaction.context, "Canonical round context: fix authentication bug");
   assert.equal(interaction.actions, "Applied patch to auth handler and re-ran tests");
 });
+
+test("brain_compact deduplicates entries, prunes low-confidence run summaries, and prunes interaction summaries", () => {
+  // 1. Duplicate memory entries
+  callTool("brain_store", {
+    dimension: "run_summary",
+    title: "Round 1 summary",
+    content: "Execution completed wave 1",
+    confidence: 0.9,
+  });
+  callTool("brain_store", {
+    dimension: "run_summary",
+    title: "Round 1 summary",
+    content: "Execution completed wave 1",
+    confidence: 0.9,
+  });
+
+  // 2. Low-confidence run summary
+  callTool("brain_store", {
+    dimension: "run_summary",
+    title: "Speculative run",
+    content: "Low confidence summary",
+    confidence: 0.2,
+  });
+
+  // 3. Low-confidence architectural decision (must be strictly preserved!)
+  callTool("brain_store", {
+    dimension: "architectural_decision",
+    title: "Adopt SQLite adapter",
+    content: "Use cross-runtime adapter",
+    confidence: 0.2,
+  });
+
+  // 4. Interaction summaries
+  const sumRes = callTool("brain_summarize", {
+    objective: "Test compact",
+    content: "Interaction 0",
+    roundNumber: 0,
+  });
+  const sessionId = sumRes.structured.sessionId as string;
+  for (let r = 1; r <= 5; r++) {
+    callTool("brain_summarize", {
+      sessionId,
+      content: `Interaction ${r}`,
+      roundNumber: r,
+    });
+  }
+
+  // 5. Call brain_compact
+  const { structured, isError } = callTool("brain_compact", {
+    runSummaryMinConfidence: 0.5,
+    maxInteractionsPerSession: 3,
+  });
+
+  assert.equal(isError, false);
+  assert.equal(structured.status, "compacted");
+  assert.equal(typeof structured.projectId, "string");
+  assert.ok(Number(structured.entriesDeduplicated) >= 1);
+  assert.ok(Number(structured.runSummariesPruned) >= 1);
+  assert.ok(Number(structured.interactionsPruned) >= 1);
+
+  // Verify architectural decision was strictly preserved
+  const queryArch = callTool("brain_query", {
+    dimensions: ["architectural_decision"],
+  });
+  const archEntries = queryArch.structured.entries as Array<Record<string, unknown>>;
+  assert.equal(archEntries.length, 1);
+  assert.equal(archEntries[0].title, "Adopt SQLite adapter");
+
+  // Verify speculative run summary was pruned
+  const queryRun = callTool("brain_query", {
+    dimensions: ["run_summary"],
+  });
+  const runEntries = queryRun.structured.entries as Array<Record<string, unknown>>;
+  assert.ok(!runEntries.some((e) => e.title === "Speculative run"));
+});
+
+test("brain_compact supports condenseInteractions", () => {
+  const sumRes = callTool("brain_summarize", {
+    objective: "Test condense",
+    content: "Initial round",
+    context: "Intent initial",
+    roundNumber: 0,
+  });
+  const sessionId = sumRes.structured.sessionId as string;
+  for (let r = 1; r <= 6; r++) {
+    callTool("brain_summarize", {
+      sessionId,
+      content: `Round ${r} done`,
+      context: `Context ${r}`,
+      actions: `Action ${r}`,
+      roundNumber: r,
+    });
+  }
+
+  const { structured, isError } = callTool("brain_compact", {
+    maxInteractionsPerSession: 2,
+    condenseInteractions: true,
+  });
+
+  assert.equal(isError, false);
+  assert.equal(structured.status, "compacted");
+  assert.ok(Number(structured.interactionsCondensed) >= 4);
+
+  // Total interactions after should be <= 3 (2 retained + 1 condensed rollup)
+  const interactions = brain.listInteractions(sessionId);
+  assert.ok(interactions.length <= 3);
+  assert.ok(interactions.some((i) => i.userIntent?.includes("[Condensed")));
+});
+

@@ -144,3 +144,64 @@ export interface RecordInteractionInput {
   /** Optional explicit id for deterministic idempotency. */
   id?: string;
 }
+
+export interface CompactionOptions {
+  /** Optional project scope. If omitted, compaction applies across all projects. */
+  projectId?: string;
+  /**
+   * Maximum number of `run_summary` entries to retain per project.
+   * Older run summaries beyond this count are pruned. Default: 50.
+   */
+  maxRunSummaries?: number;
+  /**
+   * Minimum confidence threshold for `run_summary` entries.
+   * Run summaries with confidence strictly below this threshold are pruned. Default: 0.5.
+   */
+  runSummaryMinConfidence?: number;
+  /**
+   * Maximum age for `run_summary` entries in milliseconds.
+   * Run summaries older than `now - runSummaryMaxAgeMs` are pruned.
+   */
+  runSummaryMaxAgeMs?: number;
+  /**
+   * Maximum interaction summaries to retain per session.
+   * Older interactions beyond this limit are pruned (or condensed). Default: 100.
+   */
+  maxInteractionsPerSession?: number;
+  /**
+   * Retention window in milliseconds for interaction summaries.
+   * Older interactions beyond `now - interactionRetentionMs` are pruned (or condensed).
+   */
+  interactionRetentionMs?: number;
+  /**
+   * If true, condense older interactions into a rollup interaction summary row
+   * instead of outright deleting them. Default: false.
+   */
+  condenseInteractions?: boolean;
+  /**
+   * Deduplication strategy.
+   * - "exact": deduplicates entries with identical (dimension, title, content).
+   * - "redundant": also deduplicates entries with identical (dimension, title) for run_summary/project_context,
+   *   retaining the freshest/highest-confidence entry.
+   * Default: "redundant".
+   */
+  deduplicationMode?: "exact" | "redundant";
+  /**
+   * Whether to execute SQLite VACUUM to reclaim space after pruning. Default: true.
+   */
+  vacuum?: boolean;
+}
+
+export interface CompactionResult {
+  status: "compacted";
+  projectId?: string;
+  entriesDeduplicated: number;
+  runSummariesPruned: number;
+  interactionsPruned: number;
+  interactionsCondensed: number;
+  totalEntriesBefore: number;
+  totalEntriesAfter: number;
+  totalInteractionsBefore: number;
+  totalInteractionsAfter: number;
+}
+

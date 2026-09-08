@@ -17,9 +17,14 @@ import {
   type StoreMemoryInput,
   type UpdateMemoryInput,
   type UpdateSessionInput,
+  type CompactionOptions,
+  type CompactionResult,
 } from "./types.js";
 
+export type { CompactionOptions, CompactionResult };
+
 export type BrainStoreErrorCode =
+
   | "NOT_FOUND"
   | "VALIDATION_ERROR"
   | "CONSTRAINT_ERROR";
@@ -528,7 +533,315 @@ export class BrainStore {
       .all<InteractionRow>(nodeRef)
       .map(toInteractionSummary);
   }
+
+  // -------------------------------------------------------------------------
+  // Compaction & Lifecycle
+  // -------------------------------------------------------------------------
+
+  /**
+   * Compact the Brain:
+   * 1. Deduplicates identical or redundant memory entries, retaining the freshest/highest-confidence copy.
+   * 2. Prunes older or low-confidence run_summary entries while strictly preserving durable dimensions
+   *    (architectural decisions, user preferences, past errors).
+   * 3. Prunes or condenses older interaction summaries beyond a configurable retention window.
+   * 4. Runs SQLite VACUUM to reclaim space.
+   */
+  compact(options?: CompactionOptions): CompactionResult {
+    const now = Date.now();
+    const projectId = options?.projectId?.trim() || undefined;
+    if (projectId && !this.getProject(projectId)) {
+      throw new BrainStoreError(
+        "NOT_FOUND",
+        `Cannot compact: unknown project '${projectId}'`,
+      );
+    }
+
+    const maxRunSummaries = options?.maxRunSummaries ?? 50;
+    const runSummaryMinConfidence = options?.runSummaryMinConfidence ?? 0.5;
+    const runSummaryMaxAgeMs = options?.runSummaryMaxAgeMs;
+    const maxInteractionsPerSession = options?.maxInteractionsPerSession ?? 100;
+    const interactionRetentionMs = options?.interactionRetentionMs;
+    const condenseInteractions = options?.condenseInteractions ?? false;
+    const deduplicationMode = options?.deduplicationMode ?? "redundant";
+    const vacuum = options?.vacuum ?? true;
+
+    // 0. Count before
+    const countEntriesBefore = this.db.prepare(
+      projectId
+        ? "SELECT COUNT(*) as count FROM memory_entries WHERE project_id = ?"
+        : "SELECT COUNT(*) as count FROM memory_entries",
+    ).get<{ count: number }>(...(projectId ? [projectId] : []))?.count ?? 0;
+
+    const countInteractionsBefore = this.db.prepare(
+      projectId
+        ? `SELECT COUNT(*) as count FROM interaction_summaries i
+           JOIN sessions s ON i.session_id = s.id
+           WHERE s.project_id = ?`
+        : "SELECT COUNT(*) as count FROM interaction_summaries",
+    ).get<{ count: number }>(...(projectId ? [projectId] : []))?.count ?? 0;
+
+    let entriesDeduplicated = 0;
+    let runSummariesPruned = 0;
+    let interactionsPruned = 0;
+    let interactionsCondensed = 0;
+
+    // 1. Deduplicate identical or redundant memory entries
+    const entries = this.db.prepare(
+      projectId
+        ? "SELECT * FROM memory_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC"
+        : "SELECT * FROM memory_entries ORDER BY updated_at DESC, created_at DESC",
+    ).all<MemoryRow>(...(projectId ? [projectId] : []));
+
+    const deletedEntryIds = new Set<string>();
+
+    // Pass 1: exact duplicates (project_id, dimension, title, content)
+    const exactSeen = new Map<string, MemoryRow>();
+    for (const entry of entries) {
+      if (deletedEntryIds.has(entry.id)) continue;
+      const key = `${entry.project_id}::${entry.dimension}::${entry.title.trim().toLowerCase()}::${entry.content.trim()}`;
+      const existing = exactSeen.get(key);
+      if (!existing) {
+        exactSeen.set(key, entry);
+      } else {
+        if (entry.confidence > existing.confidence) {
+          deletedEntryIds.add(existing.id);
+          exactSeen.set(key, entry);
+        } else {
+          deletedEntryIds.add(entry.id);
+        }
+      }
+    }
+
+    // Pass 2: identical content duplicates (project_id, dimension, content)
+    const contentSeen = new Map<string, MemoryRow>();
+    for (const entry of entries) {
+      if (deletedEntryIds.has(entry.id)) continue;
+      const key = `${entry.project_id}::${entry.dimension}::${entry.content.trim()}`;
+      const existing = contentSeen.get(key);
+      if (!existing) {
+        contentSeen.set(key, entry);
+      } else {
+        if (entry.confidence > existing.confidence) {
+          deletedEntryIds.add(existing.id);
+          contentSeen.set(key, entry);
+        } else {
+          deletedEntryIds.add(entry.id);
+        }
+      }
+    }
+
+    // Pass 3: redundant title deduplication in "redundant" mode for run_summary and project_context
+    if (deduplicationMode === "redundant") {
+      const titleSeen = new Map<string, MemoryRow>();
+      for (const entry of entries) {
+        if (deletedEntryIds.has(entry.id)) continue;
+        // Strictly preserve durable dimensions: NEVER deduplicate architectural_decision, user_preference, or past_error by title alone!
+        if (entry.dimension !== "run_summary" && entry.dimension !== "project_context") {
+          continue;
+        }
+        const key = `${entry.project_id}::${entry.dimension}::${entry.title.trim().toLowerCase()}`;
+        const existing = titleSeen.get(key);
+        if (!existing) {
+          titleSeen.set(key, entry);
+        } else {
+          if (entry.confidence > existing.confidence) {
+            deletedEntryIds.add(existing.id);
+            titleSeen.set(key, entry);
+          } else {
+            deletedEntryIds.add(entry.id);
+          }
+        }
+      }
+    }
+
+    // Delete deduplicated entries
+    if (deletedEntryIds.size > 0) {
+      const deleteStmt = this.db.prepare("DELETE FROM memory_entries WHERE id = ?");
+      for (const id of deletedEntryIds) {
+        deleteStmt.run(id);
+      }
+      entriesDeduplicated = deletedEntryIds.size;
+    }
+
+    // 2. Prune older or low-confidence run_summary entries while strictly preserving durable dimensions
+    const runSummaries = this.db.prepare(
+      projectId
+        ? "SELECT * FROM memory_entries WHERE project_id = ? AND dimension = 'run_summary' ORDER BY updated_at DESC, created_at DESC"
+        : "SELECT * FROM memory_entries WHERE dimension = 'run_summary' ORDER BY updated_at DESC, created_at DESC",
+    ).all<MemoryRow>(...(projectId ? [projectId] : []));
+
+    const prunedRunSummaryIds = new Set<string>();
+    const keptRunSummaries: MemoryRow[] = [];
+
+    for (const rs of runSummaries) {
+      // Low-confidence check
+      if (rs.confidence < runSummaryMinConfidence) {
+        prunedRunSummaryIds.add(rs.id);
+        continue;
+      }
+      // Older age check
+      if (runSummaryMaxAgeMs !== undefined && (now - Number(rs.created_at)) > runSummaryMaxAgeMs) {
+        prunedRunSummaryIds.add(rs.id);
+        continue;
+      }
+      keptRunSummaries.push(rs);
+    }
+
+    // Retention count limit on run_summaries (per project)
+    if (maxRunSummaries !== undefined && maxRunSummaries > 0) {
+      const byProject = new Map<string, MemoryRow[]>();
+      for (const rs of keptRunSummaries) {
+        const list = byProject.get(rs.project_id) ?? [];
+        list.push(rs);
+        byProject.set(rs.project_id, list);
+      }
+      for (const [, list] of byProject) {
+        if (list.length > maxRunSummaries) {
+          const excess = list.slice(maxRunSummaries);
+          for (const item of excess) {
+            prunedRunSummaryIds.add(item.id);
+          }
+        }
+      }
+    }
+
+    if (prunedRunSummaryIds.size > 0) {
+      const deleteStmt = this.db.prepare("DELETE FROM memory_entries WHERE id = ?");
+      for (const id of prunedRunSummaryIds) {
+        deleteStmt.run(id);
+      }
+      runSummariesPruned = prunedRunSummaryIds.size;
+    }
+
+    // 3. Prune or condense older interaction_summaries beyond retention window
+    const sessions = this.db.prepare(
+      projectId
+        ? "SELECT id, project_id FROM sessions WHERE project_id = ?"
+        : "SELECT id, project_id FROM sessions",
+    ).all<{ id: string; project_id: string }>(...(projectId ? [projectId] : []));
+
+    for (const session of sessions) {
+      const sessionInteractions = this.db.prepare(
+        "SELECT * FROM interaction_summaries WHERE session_id = ? ORDER BY round_number ASC, created_at ASC",
+      ).all<InteractionRow>(session.id);
+
+      if (sessionInteractions.length === 0) continue;
+
+      const candidateIds = new Set<string>();
+
+      // Time-based retention
+      if (interactionRetentionMs !== undefined) {
+        for (const inter of sessionInteractions) {
+          if (now - Number(inter.created_at) > interactionRetentionMs) {
+            candidateIds.add(inter.id);
+          }
+        }
+      }
+
+      // Count-based retention
+      if (maxInteractionsPerSession !== undefined && maxInteractionsPerSession > 0) {
+        if (sessionInteractions.length > maxInteractionsPerSession) {
+          const excessCount = sessionInteractions.length - maxInteractionsPerSession;
+          const oldestExcess = sessionInteractions.slice(0, excessCount);
+          for (const inter of oldestExcess) {
+            candidateIds.add(inter.id);
+          }
+        }
+      }
+
+      if (candidateIds.size === 0) continue;
+
+      const candidates = sessionInteractions.filter((i) => candidateIds.has(i.id));
+
+      if (condenseInteractions) {
+        const minRound = Math.min(...candidates.map((c) => Number(c.round_number)));
+        const maxRound = Math.max(...candidates.map((c) => Number(c.round_number)));
+        const nodeRefs = Array.from(
+          new Set(candidates.map((c) => c.node_ref).filter((n): n is string => Boolean(n))),
+        ).join(", ");
+        const condensedIntents = candidates
+          .map((c) => c.user_intent)
+          .filter(Boolean)
+          .slice(-5)
+          .join("; ");
+        const condensedActions = candidates
+          .map((c) => c.actions_taken)
+          .filter(Boolean)
+          .slice(-5)
+          .join("; ");
+        const lastOutcome = candidates[candidates.length - 1].outcome ?? "completed";
+        const condensedOutcome = `Condensed ${candidates.length} interactions (rounds ${minRound}..${maxRound}). Last outcome: ${lastOutcome}`;
+
+        const deleteStmt = this.db.prepare("DELETE FROM interaction_summaries WHERE id = ?");
+        for (const c of candidates) {
+          deleteStmt.run(c.id);
+        }
+
+        const condensedId = `condensed-${session.id}-${minRound}-${maxRound}-${randomUUID().slice(0, 8)}`;
+        this.db.prepare(
+          `INSERT INTO interaction_summaries
+           (id, session_id, round_number, user_intent, actions_taken, outcome, node_ref, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          condensedId,
+          session.id,
+          minRound,
+          `[Condensed ${candidates.length} rounds: ${minRound}..${maxRound}] ${condensedIntents || "Historical interactions"}`,
+          condensedActions || "Historical actions",
+          condensedOutcome,
+          nodeRefs || null,
+          candidates[candidates.length - 1].created_at,
+        );
+
+        interactionsCondensed += candidates.length;
+      } else {
+        const deleteStmt = this.db.prepare("DELETE FROM interaction_summaries WHERE id = ?");
+        for (const c of candidates) {
+          deleteStmt.run(c.id);
+        }
+        interactionsPruned += candidates.length;
+      }
+    }
+
+    // 4. VACUUM
+    if (vacuum) {
+      try {
+        this.db.exec("VACUUM;");
+      } catch {
+        // Ignore vacuum errors if database is in an incompatible transaction state
+      }
+    }
+
+    // 5. Count after
+    const countEntriesAfter = this.db.prepare(
+      projectId
+        ? "SELECT COUNT(*) as count FROM memory_entries WHERE project_id = ?"
+        : "SELECT COUNT(*) as count FROM memory_entries",
+    ).get<{ count: number }>(...(projectId ? [projectId] : []))?.count ?? 0;
+
+    const countInteractionsAfter = this.db.prepare(
+      projectId
+        ? `SELECT COUNT(*) as count FROM interaction_summaries i
+           JOIN sessions s ON i.session_id = s.id
+           WHERE s.project_id = ?`
+        : "SELECT COUNT(*) as count FROM interaction_summaries",
+    ).get<{ count: number }>(...(projectId ? [projectId] : []))?.count ?? 0;
+
+    return {
+      status: "compacted",
+      projectId,
+      entriesDeduplicated,
+      runSummariesPruned,
+      interactionsPruned,
+      interactionsCondensed,
+      totalEntriesBefore: Number(countEntriesBefore),
+      totalEntriesAfter: Number(countEntriesAfter),
+      totalInteractionsBefore: Number(countInteractionsBefore),
+      totalInteractionsAfter: Number(countInteractionsAfter),
+    };
+  }
 }
+
 
 // ---------------------------------------------------------------------------
 // Row mappers & helpers

@@ -9,6 +9,7 @@ import {
 import { projectGraph } from "../graph/kernel.js";
 import type { ExecutionGraph, GraphEvent } from "../graph/model.js";
 import type { BrainStore } from "./brain-store.js";
+import type { CompactionOptions, CompactionResult } from "./types.js";
 
 /**
  * Input contract for ingesting a mission into the Neural Brain.
@@ -36,6 +37,12 @@ export interface IngestMissionOptions {
   graphEvents?: GraphEvent[];
   /** Optional round number to associate with newly recorded interaction summaries. */
   roundNumber?: number;
+  /** Whether to trigger automatic compaction after ingestion in fail-open mode. Default: true. */
+  autoCompact?: boolean;
+  /** Compaction interval in rounds for interaction-based auto-compaction (default: 10). */
+  autoCompactInterval?: number;
+  /** Optional compaction options passed to brain.compact. */
+  compactionOptions?: CompactionOptions;
 }
 
 /**
@@ -49,8 +56,10 @@ export interface IngestMissionResult {
   runSummariesCreated: number;
   pastErrorsCreated: number;
   interactionsRecorded: number;
+  compaction?: CompactionResult;
   error?: string;
 }
+
 
 /**
  * Ingest mission events and projections into the Neural Brain.
@@ -357,6 +366,19 @@ export function ingestMissionIntoBrain(options: IngestMissionOptions): IngestMis
       }
     }
 
+    // 8. Auto-compaction after mission ingestion in fail-open mode
+    let compaction: CompactionResult | undefined;
+    if (options.autoCompact !== false) {
+      try {
+        compaction = brain.compact({
+          projectId,
+          ...options.compactionOptions,
+        });
+      } catch {
+        // Fail-open: compaction failure must never fail mission ingestion
+      }
+    }
+
     return {
       status: "ingested",
       missionId,
@@ -365,7 +387,9 @@ export function ingestMissionIntoBrain(options: IngestMissionOptions): IngestMis
       runSummariesCreated,
       pastErrorsCreated,
       interactionsRecorded,
+      ...(compaction ? { compaction } : {}),
     };
+
   } catch (err) {
     // Fail-open: Never let ingestion failure crash the mission or conductor
     return {

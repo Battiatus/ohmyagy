@@ -48,10 +48,11 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
     ]);
     const listed = resultFor(responses1, 2);
     assert.ok(Array.isArray(listed.tools));
-    assert.equal(listed.tools.length, 22);
+    assert.equal(listed.tools.length, 23);
     const toolNames = listed.tools.map((t: { name: string }) => t.name).sort();
     assert.deepEqual(toolNames, [
       "attest_review",
+      "brain_compact",
       "brain_query",
       "brain_store",
       "brain_summarize",
@@ -74,6 +75,7 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
       "resume_mission",
       "run_mission",
     ]);
+
 
     // 2. Propose change -> returns staged_pending_review without modifying HEAD
     const responses2 = runMcp(fixture.root, [

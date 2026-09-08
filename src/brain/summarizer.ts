@@ -1,5 +1,5 @@
 import type { BrainStore } from "./brain-store.js";
-import type { MemoryDimension } from "./types.js";
+import type { CompactionOptions, CompactionResult, MemoryDimension } from "./types.js";
 import { MEMORY_DIMENSIONS } from "./types.js";
 
 /**
@@ -57,7 +57,9 @@ export interface SummarizerResult {
   memoryId?: string;
   skippedReason?: string;
   error?: string;
+  compaction?: CompactionResult;
 }
+
 
 const MAX_RAW_OUTCOME = 600;
 
@@ -73,6 +75,10 @@ export async function captureInteraction(params: {
   text: string;
   reformulate: Reformulator;
   nodeRef?: string;
+  /** Auto-compaction trigger interval in rounds. Default: 10. Set to 0 to disable. */
+  autoCompactInterval?: number;
+  /** Optional compaction options passed to brain.compact. */
+  compactionOptions?: CompactionOptions;
 }): Promise<SummarizerResult> {
   const { brain, projectId, sessionId, projectName, text, reformulate, nodeRef } = params;
 
@@ -92,6 +98,10 @@ export async function captureInteraction(params: {
   try {
     const roundNumber = brain.listInteractions(sessionId).length;
 
+    let interactionId: string;
+    let memoryId: string | undefined;
+    let summarized: boolean;
+
     if (!summary) {
       // Fail-open fallback: never lose the raw interaction.
       const interaction = brain.recordInteraction({
@@ -102,45 +112,58 @@ export async function captureInteraction(params: {
         outcome: truncate(trimmed, MAX_RAW_OUTCOME),
         nodeRef: nodeRef ?? null,
       });
-      return {
-        recorded: true,
-        summarized: false,
-        interactionId: interaction.id,
-        error: reformulateError,
-      };
+      interactionId = interaction.id;
+      summarized = false;
+    } else {
+      const resolvedContext = summary.context || summary.userIntent || null;
+      const resolvedActions = summary.actions || summary.actionsTaken || null;
+      const resolvedNodeRef = nodeRef ?? summary.nodeRef ?? null;
+
+      const interaction = brain.recordInteraction({
+        sessionId,
+        roundNumber,
+        userIntent: resolvedContext,
+        actionsTaken: resolvedActions,
+        outcome: summary.outcome || null,
+        nodeRef: resolvedNodeRef,
+      });
+      interactionId = interaction.id;
+      summarized = true;
+
+      if (summary.memory && isValidDimension(summary.memory.dimension) && summary.memory.title.trim()) {
+        const entry = brain.storeMemory({
+          projectId,
+          sessionId,
+          dimension: summary.memory.dimension,
+          title: summary.memory.title,
+          content: summary.memory.content,
+          tags: sanitizeTags(summary.memory.tags),
+        });
+        memoryId = entry.id;
+      }
     }
 
-    const resolvedContext = summary.context || summary.userIntent || null;
-    const resolvedActions = summary.actions || summary.actionsTaken || null;
-    const resolvedNodeRef = nodeRef ?? summary.nodeRef ?? null;
-
-    const interaction = brain.recordInteraction({
-      sessionId,
-      roundNumber,
-      userIntent: resolvedContext,
-      actionsTaken: resolvedActions,
-      outcome: summary.outcome || null,
-      nodeRef: resolvedNodeRef,
-    });
-
-    let memoryId: string | undefined;
-    if (summary.memory && isValidDimension(summary.memory.dimension) && summary.memory.title.trim()) {
-      const entry = brain.storeMemory({
-        projectId,
-        sessionId,
-        dimension: summary.memory.dimension,
-        title: summary.memory.title,
-        content: summary.memory.content,
-        tags: sanitizeTags(summary.memory.tags),
-      });
-      memoryId = entry.id;
+    // Hook automatic compaction after N rounds in fail-open mode
+    const autoCompactInterval = params.autoCompactInterval ?? 10;
+    let compaction: CompactionResult | undefined;
+    if (autoCompactInterval > 0 && (roundNumber + 1) % autoCompactInterval === 0) {
+      try {
+        compaction = brain.compact({
+          projectId,
+          ...params.compactionOptions,
+        });
+      } catch {
+        // Fail-open: memory compaction failure must never break capture
+      }
     }
 
     return {
       recorded: true,
-      summarized: true,
-      interactionId: interaction.id,
-      memoryId,
+      summarized,
+      interactionId,
+      ...(memoryId ? { memoryId } : {}),
+      ...(reformulateError ? { error: reformulateError } : {}),
+      ...(compaction ? { compaction } : {}),
     };
   } catch (error) {
     return {

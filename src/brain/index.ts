@@ -18,4 +18,7 @@ export {
   type UpdateMemoryInput,
   type QueryMemoryInput,
   type RecordInteractionInput,
+  type CompactionOptions,
+  type CompactionResult,
 } from "./types.js";
+

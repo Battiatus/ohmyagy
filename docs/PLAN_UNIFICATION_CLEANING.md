@@ -113,8 +113,8 @@
 
 ## PHASE 7 — Cycle de vie mémoire (petite DB)
 
-- **T7.1 — `BrainStore.compact()`** (dédup, élagage `run_summary` anciens/faible confiance, repli des vieux `interaction_summaries` ; préserve décisions/préférences). *Test* : `brain-compaction.test.ts`. *Dépend* : T5.1.
-- **T7.2 — Déclencheur** (hook résumeur après N rounds ou outil `brain_compact`, fail-open). *Test* : DB bornée sous charge. *Dépend* : T7.1.
+- **T7.1 — `BrainStore.compact()`** (dédup, élagage `run_summary` anciens/faible confiance, repli des vieux `interaction_summaries` ; préserve décisions/préférences). *Test* : `brain-compaction.test.ts`. *Dépend* : T5.1. ✅ **Terminé**
+- **T7.2 — Déclencheur** (hook résumeur après N rounds ou outil `brain_compact`, fail-open). *Test* : DB bornée sous charge. *Dépend* : T7.1. ✅ **Terminé**
 
 ---
 
@@ -131,7 +131,8 @@
 - [ ] build 0 ; `bun test` sans **nouveau** fail (4 pré-existants inchangés).
 - [ ] Suites moteur (`dynamic-engine`, `real-mission`) inchangées & vertes (non-régression T3.3).
 - [x] Conducteur : Late-Init + **interview bloquante** + boucle `converge_step` + `graph_replan`.
-- [ ] Mémoire : `(context, actions)` + `node_ref` + dimensions ; runs (2 chemins) peuplent le brain ; DB compactée.
+- [x] Mémoire : `(context, actions)` + `node_ref` + dimensions ; runs (2 chemins) peuplent le brain ; DB compactée.
+
 - [ ] 6 rôles seuls exposés, modes = configs ; morts archivés.
 - [ ] `/oma:status` voit un run session ; (Phase 8 si retenue) plus aucun spawn détaché.
 - [ ] Scan anti-slop propre.

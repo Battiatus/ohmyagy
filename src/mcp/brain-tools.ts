@@ -21,6 +21,7 @@ export const BRAIN_TOOL_NAMES = new Set([
   "brain_store",
   "brain_query",
   "brain_summarize",
+  "brain_compact",
 ]);
 
 /** Result statuses the broker must treat as success (not JSON-RPC errors). */
@@ -28,7 +29,9 @@ export const BRAIN_SUCCESS_STATUSES = new Set([
   "stored",
   "queried",
   "summarized",
+  "compacted",
 ]);
+
 
 const DIMENSION_ENUM = [...MEMORY_DIMENSIONS];
 
@@ -111,7 +114,57 @@ export const BRAIN_TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: "brain_compact",
+    description:
+      "Compact the Neural Brain: deduplicates redundant entries, prunes older or low-confidence run summaries while strictly preserving durable dimensions, and prunes or condenses older interaction summaries.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          description: "Target project id. Defaults to the current workspace project.",
+        },
+        maxRunSummaries: {
+          type: "number",
+          description: "Maximum number of run summaries to retain per project. Default: 50.",
+          minimum: 1,
+        },
+        runSummaryMinConfidence: {
+          type: "number",
+          description: "Prune run summaries with confidence strictly below this threshold. Default: 0.5.",
+          minimum: 0,
+          maximum: 1,
+        },
+        runSummaryMaxAgeMs: {
+          type: "number",
+          description: "Prune run summaries older than this age in milliseconds.",
+          minimum: 1,
+        },
+        maxInteractionsPerSession: {
+          type: "number",
+          description: "Maximum interaction summaries to retain per session. Default: 100.",
+          minimum: 1,
+        },
+        interactionRetentionMs: {
+          type: "number",
+          description: "Retention window in milliseconds for interaction summaries.",
+          minimum: 1,
+        },
+        condenseInteractions: {
+          type: "boolean",
+          description: "If true, condense older interactions into a rollup summary instead of deleting. Default: false.",
+        },
+        deduplicationMode: {
+          type: "string",
+          enum: ["exact", "redundant"],
+          description: "Deduplication strategy: exact or redundant (retains freshest/highest confidence). Default: redundant.",
+        },
+      },
+    },
+  },
 ] as const;
+
 
 /**
  * Resolve the project a brain tool call targets. An explicit `projectId` must
@@ -273,6 +326,48 @@ function executeSummarize(
   };
 }
 
+function executeCompact(
+  brain: BrainStore,
+  workspaceRoot: string,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const project = resolveProject(brain, workspaceRoot, input);
+  const result = brain.compact({
+    projectId: project.id,
+    maxRunSummaries:
+      typeof input.maxRunSummaries === "number" ? input.maxRunSummaries : undefined,
+    runSummaryMinConfidence:
+      typeof input.runSummaryMinConfidence === "number"
+        ? input.runSummaryMinConfidence
+        : undefined,
+    runSummaryMaxAgeMs:
+      typeof input.runSummaryMaxAgeMs === "number"
+        ? input.runSummaryMaxAgeMs
+        : undefined,
+    maxInteractionsPerSession:
+      typeof input.maxInteractionsPerSession === "number"
+        ? input.maxInteractionsPerSession
+        : undefined,
+    interactionRetentionMs:
+      typeof input.interactionRetentionMs === "number"
+        ? input.interactionRetentionMs
+        : undefined,
+    condenseInteractions:
+      typeof input.condenseInteractions === "boolean"
+        ? input.condenseInteractions
+        : undefined,
+    deduplicationMode:
+      input.deduplicationMode === "exact" || input.deduplicationMode === "redundant"
+        ? input.deduplicationMode
+        : undefined,
+  });
+  return {
+    ...result,
+    projectId: project.id,
+  };
+}
+
+
 /**
  * Dispatch a brain tool call. Throws {@link BrainStoreError} on invalid input;
  * the broker maps thrown errors to a rejected JSON-RPC result.
@@ -291,7 +386,10 @@ export function executeBrainTool(
       return executeQuery(brain, workspaceRoot, args);
     case "brain_summarize":
       return executeSummarize(brain, workspaceRoot, args);
+    case "brain_compact":
+      return executeCompact(brain, workspaceRoot, args);
     default:
       throw new Error(`Unknown brain tool: ${toolName}`);
   }
 }
+
