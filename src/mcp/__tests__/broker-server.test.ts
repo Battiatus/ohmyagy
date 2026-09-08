@@ -48,7 +48,7 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
     ]);
     const listed = resultFor(responses1, 2);
     assert.ok(Array.isArray(listed.tools));
-    assert.equal(listed.tools.length, 18);
+    assert.equal(listed.tools.length, 19);
     const toolNames = listed.tools.map((t: { name: string }) => t.name).sort();
     assert.deepEqual(toolNames, [
       "attest_review",
@@ -65,6 +65,7 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
       "list_missions",
       "mission_inspect",
       "mission_status",
+      "plan_route",
       "promote_change",
       "propose_change",
       "resume_mission",
@@ -235,6 +236,34 @@ test("negotiates AGY's MCP protocol version during initialization", () => {
     const responses = runMcp(fixture.root, [initializeRequest(1, "2024-11-05")]);
     const initialized = resultFor(responses, 1);
     assert.equal(initialized.protocolVersion, "2024-11-05");
+  } finally {
+    rmSync(fixture.container, { recursive: true, force: true });
+  }
+});
+
+test("T2.3: broker exposes and executes plan_route through MCP stdio protocol", () => {
+  const fixture = createRepository(false);
+  try {
+    installWorkspacePlugin(fixture.root, { gates: [nodeGate("pass", "process.exit(0)")] });
+    const responses = runMcp(fixture.root, [
+      initializeRequest(1),
+      toolCall(2, "plan_route", { mode: "bugfix" }),
+      toolCall(3, "plan_route", { mode: "diagnostic" }),
+    ]);
+
+    const bugfixResult = resultFor(responses, 2);
+    assert.ok(isRecord(bugfixResult.structuredContent));
+    assert.equal(bugfixResult.isError, false);
+    assert.equal(bugfixResult.structuredContent.status, "routed");
+    assert.equal(bugfixResult.structuredContent.mode, "bugfix");
+    assert.deepEqual(bugfixResult.structuredContent.roles, ["planner", "executor", "verifier"]);
+
+    const diagResult = resultFor(responses, 3);
+    assert.ok(isRecord(diagResult.structuredContent));
+    assert.equal(diagResult.isError, false);
+    assert.equal(diagResult.structuredContent.status, "routed");
+    assert.equal(diagResult.structuredContent.mode, "diagnostic");
+    assert.deepEqual(diagResult.structuredContent.roles, ["explorer", "reviewer"]);
   } finally {
     rmSync(fixture.container, { recursive: true, force: true });
   }

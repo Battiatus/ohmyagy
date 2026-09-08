@@ -22,6 +22,8 @@ export * from "./runtime/process-runner.js";
 export * from "./runtime/secret-scrubber.js";
 export * from "./runtime/agy-driver.js";
 export * from "./runtime/capability-resolver.js";
+export * from "./runtime/mode-router.js";
+export * from "./mcp/routing-tools.js";
 export * from "./runtime/doctor.js";
 export * from "./oracle/objective-judge.js";
 export * from "./oracle/adversarial-review.js";
