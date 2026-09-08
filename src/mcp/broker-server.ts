@@ -30,6 +30,13 @@ import {
   summarizeMission,
 } from "../mission/read-model.js";
 import { OmaDoctor } from "../runtime/doctor.js";
+import { BrainStore } from "../brain/brain-store.js";
+import {
+  BRAIN_SUCCESS_STATUSES,
+  BRAIN_TOOL_DEFINITIONS,
+  BRAIN_TOOL_NAMES,
+  executeBrainTool,
+} from "./brain-tools.js";
 
 const protocolVersion = "2025-06-18";
 const supportedProtocolVersions = new Set(["2024-11-05", protocolVersion]);
@@ -42,6 +49,23 @@ export interface BrokerConfig {
   runKey?: string;
   expertId?: string;
   ledgerPath?: string;
+  /** Path to the Neural Brain SQLite database. Defaults to `.oma/brain.sqlite`. */
+  brainPath?: string;
+}
+
+/** Lazily open the Neural Brain so servers that never touch it create no file. */
+export type BrainAccessor = () => BrainStore;
+
+function createBrainAccessor(config: BrokerConfig): BrainAccessor {
+  let brain: BrainStore | undefined;
+  return () => {
+    if (!brain) {
+      const brainPath =
+        config.brainPath ?? join(config.workspaceRoot, ".oma", "brain.sqlite");
+      brain = new BrainStore(brainPath);
+    }
+    return brain;
+  };
 }
 
 export interface StagedRecord {
@@ -86,6 +110,7 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
   }
 
   const stagedRecords = new Map<string, StagedRecord>();
+  const getBrain = createBrainAccessor(config);
 
   readline.on("line", (line) => {
     if (!line.trim()) return;
@@ -95,7 +120,7 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
         // Notification - do not send response
         return;
       }
-      const response = handleRequest(config, journal, stagedRecords, request);
+      const response = handleRequest(config, journal, stagedRecords, request, getBrain);
       process.stdout.write(`${JSON.stringify(response)}\n`);
     } catch (error) {
       process.stdout.write(
@@ -114,6 +139,7 @@ export function handleRequest(
   journal: MissionJournal,
   stagedRecords: Map<string, StagedRecord>,
   request: JsonRpcRequest,
+  getBrain?: BrainAccessor,
 ): Record<string, unknown> {
   if (request.method === "initialize") {
     return {
@@ -252,6 +278,7 @@ export function handleRequest(
               properties: {},
             },
           },
+          ...BRAIN_TOOL_DEFINITIONS,
         ],
       },
     };
@@ -279,6 +306,9 @@ export function handleRequest(
         result = executeResumeMission(config, input);
       } else if (toolName === "doctor") {
         result = executeDoctor(config);
+      } else if (typeof toolName === "string" && BRAIN_TOOL_NAMES.has(toolName)) {
+        const accessor = getBrain ?? createBrainAccessor(config);
+        result = executeBrainTool(accessor(), config.workspaceRoot, toolName, input);
       } else {
         throw new Error(`Unknown tool: ${toolName}`);
       }
@@ -289,7 +319,8 @@ export function handleRequest(
         result.status !== "review_attested" &&
         result.status !== "started" &&
         result.status !== "succeeded" &&
-        result.status !== "reported";
+        result.status !== "reported" &&
+        !(typeof result.status === "string" && BRAIN_SUCCESS_STATUSES.has(result.status));
 
       return {
         jsonrpc: "2.0",
@@ -686,5 +717,6 @@ if (
     runKey: process.env.OMA_RUN_KEY,
     expertId: process.env.OMA_EXPERT_ID,
     ledgerPath: process.env.OMA_LEDGER_PATH,
+    brainPath: process.env.OMA_BRAIN_PATH,
   });
 }
