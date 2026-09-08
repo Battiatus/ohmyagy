@@ -49,6 +49,12 @@ import {
   ROUTING_TOOL_NAMES,
   executeRoutingTool,
 } from "./routing-tools.js";
+import {
+  ORCHESTRATION_SUCCESS_STATUSES,
+  ORCHESTRATION_TOOL_DEFINITIONS,
+  ORCHESTRATION_TOOL_NAMES,
+  executeOrchestrationTool,
+} from "./orchestration-tools.js";
 import { GraphBrokerError } from "../graph/broker.js";
 
 const protocolVersion = "2025-06-18";
@@ -294,6 +300,7 @@ export function handleRequest(
           ...BRAIN_TOOL_DEFINITIONS,
           ...GRAPH_TOOL_DEFINITIONS,
           ...ROUTING_TOOL_DEFINITIONS,
+          ...ORCHESTRATION_TOOL_DEFINITIONS,
         ],
       },
     };
@@ -328,6 +335,8 @@ export function handleRequest(
         result = executeGraphTool(config.workspaceRoot, toolName, input);
       } else if (typeof toolName === "string" && ROUTING_TOOL_NAMES.has(toolName)) {
         result = executeRoutingTool(toolName, input);
+      } else if (typeof toolName === "string" && ORCHESTRATION_TOOL_NAMES.has(toolName)) {
+        result = executeOrchestrationTool(config.workspaceRoot, toolName, input);
       } else {
         throw new Error(`Unknown tool: ${toolName}`);
       }
@@ -341,7 +350,8 @@ export function handleRequest(
         result.status !== "reported" &&
         !(typeof result.status === "string" && BRAIN_SUCCESS_STATUSES.has(result.status)) &&
         !(typeof result.status === "string" && GRAPH_SUCCESS_STATUSES.has(result.status)) &&
-        !(typeof result.status === "string" && ROUTING_SUCCESS_STATUSES.has(result.status));
+        !(typeof result.status === "string" && ROUTING_SUCCESS_STATUSES.has(result.status)) &&
+        !(typeof result.status === "string" && ORCHESTRATION_SUCCESS_STATUSES.has(result.status));
 
       return {
         jsonrpc: "2.0",

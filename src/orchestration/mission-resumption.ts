@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { sha256 } from "../ledger/canonical.js";
 import {
@@ -281,10 +281,15 @@ export class MissionResumptionEngine {
     let finalCommitSha = integration.commitHash;
     if (integration.status === "integrated") {
       try {
-        const isGitRepo = spawnSync("git", ["-C", workspaceRoot, "rev-parse", "--is-inside-work-tree"], {
-          encoding: "utf8",
-          windowsHide: true,
-        }).status === 0;
+        const topLevelRes = spawnSync(
+          "git",
+          ["-C", workspaceRoot, "rev-parse", "--show-toplevel"],
+          { encoding: "utf8", windowsHide: true },
+        );
+        const isGitRepo =
+          topLevelRes.status === 0 &&
+          resolve(topLevelRes.stdout.trim()).toLowerCase() ===
+            resolve(workspaceRoot).toLowerCase();
 
         if (isGitRepo) {
           spawnSync("git", ["-C", workspaceRoot, "add", "."], { encoding: "utf8", windowsHide: true });

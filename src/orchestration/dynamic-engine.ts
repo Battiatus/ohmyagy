@@ -39,11 +39,12 @@ import * as originalMath from "../../test-fixtures/minimal-pipeline/src/math.js"
 import * as originalParser from "../../test-fixtures/minimal-pipeline/src/parser.js";
 import * as originalPipeline from "../../test-fixtures/minimal-pipeline/src/pipeline.js";
 
-export interface DynamicWorkflowLimits {
-  maxRounds: number;
-  maxTimeMs: number;
-  maxConsecutiveNoProgressRounds: number;
-}
+import {
+  evaluateConvergenceStep,
+  type DynamicWorkflowLimits,
+} from "./convergence-step.js";
+
+export type { DynamicWorkflowLimits };
 
 export interface DynamicEngineOptions {
   workspaceRoot: string;
@@ -81,6 +82,52 @@ export interface DynamicConvergenceReport {
   totalDurationMs: number;
 }
 
+/**
+ * DynamicConvergenceEngine Execution Loop Architectural Mapping (T3.1):
+ *
+ * 1. INITIALIZATION & WORKSPACE SETUP:
+ *    - Resolve paths: .oma/missions/<missionId>, events.jsonl, artifacts/, worktrees/.
+ *    - Initialize Graph Store DAG runtime (execution-graph.json, graph-events.jsonl, HEAD).
+ *    - Emit mission_started journal event with budgets (maxRounds, maxTimeMs).
+ *    - Load base module bundle and prepare initial work items.
+ *
+ * 2. ITEM DISCOVERY (Wave 1):
+ *    - InitialWorkItemsSupplier (if provided) OR invoke Planner persona via AgyDriver.
+ *    - Fallback: fails closed with mission_finished: failed if planner fails.
+ *
+ * 3. WAVE CONVERGENCE LOOP (CurrentWave <= limits.maxRounds):
+ *    - Check overall time budget (Date.now() - startTime > maxTimeMs).
+ *    - Emit wave_started.
+ *    - Materialize & register work items as DAG nodes in graph runtime (appendGraphTransition: node_dispatched).
+ *    - Emit work_item_discovered.
+ *    - PARALLEL EXECUTION:
+ *      * Acquire isolated git worktree via WorktreePool.
+ *      * Emit run_started.
+ *      * Invoke AgyDriver (executor persona on wave 1, fixer on subsequent waves).
+ *      * Extract git diff or patch, write diff artifact, compute sha256 digest.
+ *      * Emit run_finished and artifact_created.
+ *      * Release worktree.
+ *    - DUAL ADVERSARIAL AUDIT:
+ *      * Reviewer Alpha and Reviewer Beta independently evaluate staged diff.
+ *      * Emit review_attested for each reviewer with cryptographic verdict.
+ *    - 2-PHASE COMMIT INTEGRATION:
+ *      * DeterministicIntegrator integrates only doubly-approved proposals.
+ *      * If integrated, commit staged changes to workspace git repository.
+ *    - OBJECTIVE JUDGE & PROGRESS VECTOR:
+ *      * ObjectiveJudge runs hidden + visible tests on integrated bundle.
+ *      * Compute ProgressVector (hidden/visible test counts, gate failures, diagnostics).
+ *      * Emit gate_evaluated.
+ *    - CONVERGENCE STEP EVALUATION (evaluateConvergenceStep):
+ *      * State A (Converged): Judge approved + integrated -> emit terminal_verdict_rendered, mission_finished: succeeded.
+ *      * State B (Stagnation): ObjectiveJudge.isProgressing(prev, curr) === false for >= maxConsecutiveNoProgressRounds
+ *        -> emit terminal_verdict_rendered, mission_finished: no_progress_blocked.
+ *      * State C (Budget Exhausted): CurrentWave >= maxRounds -> emit mission_finished: budget_exhausted.
+ *      * State D (In Progress / Adaptation):
+ *        - Emit wave_transitioned linking previous and current progress.
+ *        - Trigger Dynamic Re-planning: DiagnosticFixerSupplier or Fixer persona
+ *          targets diagnostics from JudgeVerdict to generate next wave work items.
+ *        - Increment currentWave and repeat.
+ */
 export class DynamicConvergenceEngine {
   public static async execute(options: DynamicEngineOptions): Promise<DynamicConvergenceReport> {
     const startTime = Date.now();
@@ -561,11 +608,15 @@ export class DynamicConvergenceEngine {
       let finalCommitSha = integration.commitHash;
       if (integration.status === "integrated" && approvedProposals.length > 0) {
         try {
+          const topLevelRes = spawnSync(
+            "git",
+            ["-C", workspaceRoot, "rev-parse", "--show-toplevel"],
+            { encoding: "utf8", windowsHide: true },
+          );
           const isGitRepo =
-            spawnSync("git", ["-C", workspaceRoot, "rev-parse", "--is-inside-work-tree"], {
-              encoding: "utf8",
-              windowsHide: true,
-            }).status === 0;
+            topLevelRes.status === 0 &&
+            resolve(topLevelRes.stdout.trim()).toLowerCase() ===
+              resolve(workspaceRoot).toLowerCase();
 
           if (isGitRepo) {
             // Check if there are actual modified or untracked changes before attempting to commit
@@ -619,8 +670,28 @@ export class DynamicConvergenceEngine {
         diagnostics: judgeVerdict.diagnostics,
       });
 
-      // 5. Convergence Evaluation
-      if (judgeVerdict.status === "approved" && integration.status === "integrated") {
+      // 5. Convergence Evaluation via extracted pure engine (T3.3)
+      const isIntegratedSuccess = judgeVerdict.status === "approved" && integration.status === "integrated";
+      const stepEvaluation = evaluateConvergenceStep({
+        graph: graphRuntime?.graph ?? {
+          schemaVersion: 1,
+          graphId: `graph-${missionId}`,
+          revision: 1,
+          schedulerAuthorityId: "oma-dynamic-engine",
+          nodes: [],
+          edges: [],
+        },
+        events: graphRuntime?.events ?? [],
+        progressHistory,
+        limits,
+        currentProgress,
+        currentRound: currentWave,
+        startTimeMs: startTime,
+        currentTimeMs: Date.now(),
+        isIntegrated: isIntegratedSuccess,
+      });
+
+      if (stepEvaluation.status === "succeeded") {
         MissionEventsStore.appendEvent(eventsPath, missionId, {
           type: "integration_attempted",
           waveIndex: currentWave,
@@ -656,21 +727,7 @@ export class DynamicConvergenceEngine {
         };
       }
 
-      // If Rejected: Check Progress Monotonicity
-      const previousProgress =
-        progressHistory.length >= 2 ? progressHistory[progressHistory.length - 2] : null;
-
-      const hasProgressed = previousProgress
-        ? ObjectiveJudge.isProgressing(previousProgress, currentProgress)
-        : true;
-
-      if (!hasProgressed) {
-        consecutiveNoProgressCount++;
-      } else {
-        consecutiveNoProgressCount = 0;
-      }
-
-      if (consecutiveNoProgressCount >= limits.maxConsecutiveNoProgressRounds) {
+      if (stepEvaluation.status === "no_progress_blocked") {
         MissionEventsStore.appendEvent(eventsPath, missionId, {
           type: "terminal_verdict_rendered",
           runId: `terminal-${missionId}`,
@@ -695,8 +752,7 @@ export class DynamicConvergenceEngine {
         };
       }
 
-      // Check max rounds limit
-      if (currentWave >= limits.maxRounds) {
+      if (stepEvaluation.status === "budget_exhausted") {
         MissionEventsStore.appendEvent(eventsPath, missionId, {
           type: "terminal_verdict_rendered",
           runId: `terminal-${missionId}`,
@@ -722,6 +778,12 @@ export class DynamicConvergenceEngine {
       }
 
       // 6. Dynamic Graph Adaptation & Wave Transition
+      const previousProgress =
+        progressHistory.length >= 2 ? progressHistory[progressHistory.length - 2] : null;
+      const hasProgressed = previousProgress
+        ? ObjectiveJudge.isProgressing(previousProgress, currentProgress)
+        : true;
+
       const nextWave = currentWave + 1;
       MissionEventsStore.appendEvent(eventsPath, missionId, {
         type: "wave_transitioned",
