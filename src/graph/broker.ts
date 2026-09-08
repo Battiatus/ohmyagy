@@ -356,6 +356,10 @@ export class GraphBroker {
    * without mutating on-disk state.
    */
   public async validateProposal(proposalInput: unknown): Promise<GraphBrokerValidationResult> {
+    return Promise.resolve(this.validateProposalSync(proposalInput));
+  }
+
+  public validateProposalSync(proposalInput: unknown): GraphBrokerValidationResult {
     let proposal: GraphProposal;
     try {
       proposal = parseGraphProposal(proposalInput);
@@ -655,7 +659,11 @@ export class GraphBroker {
    * overwriting execution-graph.json and appending revision_published event to JournalStore.
    */
   public async applyProposal(proposalInput: unknown): Promise<CasPublicationResult> {
-    return this.withExclusiveLock(async () => {
+    return Promise.resolve(this.applyProposalSync(proposalInput));
+  }
+
+  public applyProposalSync(proposalInput: unknown): CasPublicationResult {
+    return this.withExclusiveLockSync(() => {
       // 0. Verify journal integrity before attempting CAS
       let integrity: { valid: boolean; error?: string };
       try {
@@ -676,7 +684,7 @@ export class GraphBroker {
       }
 
       // 1. Re-validate under exclusive file lock
-      const validation = await this.validateProposal(proposalInput);
+      const validation = this.validateProposalSync(proposalInput);
       if (!validation.valid || !validation.proposedGraph || !validation.deltaSummary) {
         const primaryError = validation.diagnostics[0];
         let code: GraphBrokerDiagnosticCode = primaryError?.code ?? "CAS_CONFLICT";
@@ -922,6 +930,40 @@ export class GraphBroker {
       }
     }
     return events;
+  }
+
+  private withExclusiveLockSync<T>(action: () => T): T {
+    mkdirSync(dirname(this.paths.lock), { recursive: true });
+    const startTime = Date.now();
+    let fd: number | undefined;
+
+    while (Date.now() - startTime < this.lockTimeoutMs) {
+      try {
+        fd = openSync(this.paths.lock, "wx");
+        break;
+      } catch {
+        const sleepMs = 50;
+        const waitUntil = Date.now() + sleepMs;
+        while (Date.now() < waitUntil) {
+          // brief backoff
+        }
+      }
+    }
+
+    if (fd === undefined) {
+      return {
+        success: false,
+        code: "CAS_CONFLICT" as GraphBrokerDiagnosticCode,
+        error: `Could not acquire graph lock at ${this.paths.lock} within ${this.lockTimeoutMs}ms.`,
+      } as unknown as T;
+    }
+
+    try {
+      return action();
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+      rmSync(this.paths.lock, { force: true });
+    }
   }
 
   private withExclusiveLock<T>(action: () => T | Promise<T>): Promise<T> {

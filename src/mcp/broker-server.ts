@@ -37,6 +37,13 @@ import {
   BRAIN_TOOL_NAMES,
   executeBrainTool,
 } from "./brain-tools.js";
+import {
+  GRAPH_SUCCESS_STATUSES,
+  GRAPH_TOOL_DEFINITIONS,
+  GRAPH_TOOL_NAMES,
+  executeGraphTool,
+} from "./graph-tools.js";
+import { GraphBrokerError } from "../graph/broker.js";
 
 const protocolVersion = "2025-06-18";
 const supportedProtocolVersions = new Set(["2024-11-05", protocolVersion]);
@@ -279,6 +286,7 @@ export function handleRequest(
             },
           },
           ...BRAIN_TOOL_DEFINITIONS,
+          ...GRAPH_TOOL_DEFINITIONS,
         ],
       },
     };
@@ -309,6 +317,8 @@ export function handleRequest(
       } else if (typeof toolName === "string" && BRAIN_TOOL_NAMES.has(toolName)) {
         const accessor = getBrain ?? createBrainAccessor(config);
         result = executeBrainTool(accessor(), config.workspaceRoot, toolName, input);
+      } else if (typeof toolName === "string" && GRAPH_TOOL_NAMES.has(toolName)) {
+        result = executeGraphTool(config.workspaceRoot, toolName, input);
       } else {
         throw new Error(`Unknown tool: ${toolName}`);
       }
@@ -320,7 +330,8 @@ export function handleRequest(
         result.status !== "started" &&
         result.status !== "succeeded" &&
         result.status !== "reported" &&
-        !(typeof result.status === "string" && BRAIN_SUCCESS_STATUSES.has(result.status));
+        !(typeof result.status === "string" && BRAIN_SUCCESS_STATUSES.has(result.status)) &&
+        !(typeof result.status === "string" && GRAPH_SUCCESS_STATUSES.has(result.status));
 
       return {
         jsonrpc: "2.0",
@@ -332,11 +343,22 @@ export function handleRequest(
         },
       };
     } catch (error) {
-      const reasonCode = error instanceof JournalRefusal ? error.reasonCode : undefined;
-      const failure = {
+      const reasonCode =
+        error instanceof JournalRefusal
+          ? error.reasonCode
+          : error instanceof GraphBrokerError
+            ? error.code
+            : undefined;
+      const failure: Record<string, unknown> = {
         status: "rejected",
         reason: messageOf(error),
         ...(reasonCode ? { reasonCode } : {}),
+        ...(error instanceof GraphBrokerError && error.diagnostics.length > 0
+          ? { diagnostics: error.diagnostics }
+          : {}),
+        ...(error instanceof GraphBrokerError && error.cyclePath
+          ? { cyclePath: error.cyclePath }
+          : {}),
       };
       return {
         jsonrpc: "2.0",
