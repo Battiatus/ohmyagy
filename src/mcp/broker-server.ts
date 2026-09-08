@@ -106,7 +106,7 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
     ledgerPath ? { journalStorePath: ledgerPath } : undefined,
   );
 
-  const authorRunKey = config.runKey ?? "worker-run";
+  const authorRunKey = config.runKey ?? "executor-run";
   const authorExpertId = config.expertId ?? "oma-executor";
   if (!journal.expertIdForRun(authorRunKey)) {
     journal.appendRunStarted({
@@ -486,7 +486,7 @@ function executeProposal(
     }
 
     const missionId = config.missionId ?? journal.missionId;
-    const authorRunKey = config.runKey ?? "worker-run";
+    const authorRunKey = config.runKey ?? "executor-run";
     const authorExpertId = config.expertId ?? "oma-executor";
     const leaseId = `lease-${Date.now()}`;
     const epoch = "1";
@@ -578,7 +578,7 @@ function executeAttestReview(
 
   const authorRunKey = stagedEvent
     ? stagedEvent.runKey
-    : stagedRecords.get(transactionId)?.authorRunKey ?? (config.runKey ?? "worker-run");
+    : stagedRecords.get(transactionId)?.authorRunKey ?? (config.runKey ?? "executor-run");
 
   const subject: ReviewSubject[] = [
     {

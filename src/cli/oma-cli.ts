@@ -541,14 +541,14 @@ Usage:
         --model <id>                             Override AI model slug
         --effort <low|medium|high>               Set reasoning effort
         --timeout-ms <n>                         Per-task timeout in milliseconds
-        --concurrency <n>                        Maximum concurrent workers (default: 3)
+        --concurrency <n>                        Maximum concurrent executors (default: 3)
         --max-waves <n>                          Maximum dynamic workflow waves (default: 3)
   oma resume [--mission <id>] [--gates <file>]   Resume a real graph mission from its durable journal
   oma watch [--mission <id>] [--once]            Follow the active mission from its durable journal
   oma status [--json] [--mission <id>]          Inspect live mission state, progress vector, and queues
   oma inspect [options] [--mission <id>]        Interactive inspection and debugging
       Options:
-        --diff [nodeId]                          Display unified Git diff(s) produced by workers
+        --diff [nodeId]                          Display unified Git diff(s) produced by executors
         --runs                                   List all agent executions with status and durations
         --log <runId>                            Display full prompt, live transcript, and raw outputs
         --gates                                  Display external gate evaluation outputs and error logs

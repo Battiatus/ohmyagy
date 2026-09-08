@@ -344,6 +344,17 @@ function deployCoreAgents(stagingDir: string): void {
       ].join("\n"),
     },
     {
+      name: "summarizer",
+      content: [
+        "---",
+        "name: summarizer",
+        "description: OMA memory mini-agent — compresses each interaction into context+actions for the Neural Brain (Gemini Flash, read-only)",
+        "---",
+        "# OMA Memory Summarizer",
+        "Compresses each interaction round into dense, factual context and actions records for the Neural Brain.",
+      ].join("\n"),
+    },
+    {
       name: "fixer",
       content: [
         "---",

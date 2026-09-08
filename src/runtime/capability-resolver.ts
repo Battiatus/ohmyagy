@@ -10,6 +10,7 @@ export const ROLE_ALIASES: Record<string, string> = {
   worker: "executor",
   executor: "executor",
   orchestrator: "session",
+  session: "orchestrator",
 };
 
 export interface ExpertSpec {
@@ -148,7 +149,7 @@ export class CapabilityResolver {
           readOnly: false,
         };
     } else {
-      expert = spec;
+      expert = spec.role === "worker" ? { ...spec, role: "executor" } : spec;
     }
 
     const modelSlug = overrides.modelOverride ?? this.DEFAULT_MODELS[expert.modelClass];

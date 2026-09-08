@@ -129,7 +129,14 @@ export class OmaDoctor {
     const declaredAgents: string[] = [];
     const declaredSkills: string[] = [];
     const diagnostics: string[] = [];
-    const coreAgentsRequired = ["planner", "worker", "reviewer", "fixer"];
+    const coreAgentsRequired = [
+      "orchestrator",
+      "planner",
+      "explorer",
+      "executor",
+      "reviewer",
+      "verifier",
+    ];
 
     if (pluginInstalled) {
       const pluginJsonPath = join(pluginDir, "plugin.json");
@@ -157,7 +164,10 @@ export class OmaDoctor {
       }
 
       for (const req of coreAgentsRequired) {
-        if (!declaredAgents.includes(req)) {
+        const isPresent =
+          declaredAgents.includes(req) ||
+          (req === "executor" && declaredAgents.includes("worker"));
+        if (!isPresent) {
           diagnostics.push(`Core agent persona '${req}' is missing from the workspace plugin`);
         }
       }
@@ -165,10 +175,14 @@ export class OmaDoctor {
       // Attest deployed agents in workspace (.agents/agents/{agent}/agent.md) or pluginDir
       const nativeAgentsDir = join(workspaceRoot, ".agents", "agents");
       for (const req of coreAgentsRequired) {
-        const nativeFolder = join(nativeAgentsDir, req, "agent.md");
-        const nativeFlat = join(nativeAgentsDir, `${req}.md`);
-        const pluginFile = join(pluginDir, "agents", `${req}.md`);
-        if (existsSync(nativeFolder) || existsSync(nativeFlat) || existsSync(pluginFile)) {
+        const namesToCheck = req === "executor" ? ["executor", "worker"] : [req];
+        const found = namesToCheck.some((name) => {
+          const nativeFolder = join(nativeAgentsDir, name, "agent.md");
+          const nativeFlat = join(nativeAgentsDir, `${name}.md`);
+          const pluginFile = join(pluginDir, "agents", `${name}.md`);
+          return existsSync(nativeFolder) || existsSync(nativeFlat) || existsSync(pluginFile);
+        });
+        if (found) {
           agentsDetected.push(req);
         } else {
           diagnostics.push(`Core agent persona '${req}' is missing from the workspace plugin`);

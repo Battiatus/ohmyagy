@@ -455,7 +455,7 @@ async function runGraphMission(context: GraphMissionContext): Promise<RealMissio
     if (failures.length > 0 || changes.length !== dispatched.length) {
       const allFailures = failures.length > 0
         ? failures
-        : dispatched.map((entry) => ({ node: entry.node, runId: `run-${entry.node.id}`, reason: "A worker completed without a promotable diff." }));
+        : dispatched.map((entry) => ({ node: entry.node, runId: `run-${entry.node.id}`, reason: "An executor completed without a promotable diff." }));
       context.logger.log("Wave", `Wave ${wave} had ${allFailures.length} failure(s): ${allFailures.map(f => f.reason).join("; ")}`, "WARN");
       await completeFailedBatch(context, dispatched, allFailures);
       if (wave >= context.maxWaves) {
@@ -536,25 +536,27 @@ async function executeNode(
   dispatchId: string,
 ): Promise<WorktreeChange | BatchFailure> {
   const runId = `run-${node.id}-${Date.now()}`;
+  const persona = node.executor?.persona ?? "executor";
+  const logTag = `${persona.charAt(0).toUpperCase() + persona.slice(1)}:${node.id}`;
   let worktreePath = "";
   try {
     worktreePath = await context.worktreePool.acquire(node.id, "HEAD");
-    context.logger.log(`Worker:${node.id}`, `Acquired isolated worktree at ${worktreePath}`);
+    context.logger.log(logTag, `Acquired isolated worktree at ${worktreePath}`);
     MissionEventsStore.appendEvent(context.eventsPath, context.missionId, {
       type: "run_started",
       runId,
       workItemId: node.id,
-      expertId: node.executor?.persona ?? "executor",
+      expertId: persona,
       model: context.model ?? "default",
       effort: context.effort ?? "agy-default",
       worktreePath,
     });
 
-    const promptText = workerPrompt(context.goal, node);
+    const promptText = executorPrompt(context.goal, node);
     const workerRunLogger = context.logger.createRunLogger({
       runId,
-      expertId: node.executor?.persona ?? "executor",
-      persona: node.executor?.persona ?? "executor",
+      expertId: persona,
+      persona,
       model: context.model,
       effort: context.effort,
       worktree: worktreePath,
@@ -563,7 +565,7 @@ async function executeNode(
 
     const result = await context.driver.invoke({
       contractPrompt: promptText,
-      persona: node.executor?.persona ?? "executor",
+      persona,
       worktreeDir: worktreePath,
       timeoutMs: context.timeoutMs,
       modelOverride: context.model,
@@ -583,7 +585,7 @@ async function executeNode(
       error: result.error,
     });
 
-    const receipt = persistArtifact(context.missionDir, `worker-${safeFileName(node.id)}-${safeFileName(runId)}.json`, JSON.stringify(receiptPayload(result), null, 2));
+    const receipt = persistArtifact(context.missionDir, `${persona}-${safeFileName(node.id)}-${safeFileName(runId)}.json`, JSON.stringify(receiptPayload(result), null, 2));
     MissionEventsStore.appendEvent(context.eventsPath, context.missionId, {
       type: "artifact_created",
       runId,
@@ -593,13 +595,13 @@ async function executeNode(
       artifactKind: "report",
     });
     if (result.status !== "success") {
-      context.logger.log(`Worker:${node.id}`, `Execution failed (${result.status}): ${result.error ?? "No error details"}`, "ERROR");
-      return { node, runId, reason: result.error ?? `Worker exited with ${result.status}.` };
+      context.logger.log(logTag, `Execution failed (${result.status}): ${result.error ?? "No error details"}`, "ERROR");
+      return { node, runId, reason: result.error ?? `${persona.charAt(0).toUpperCase() + persona.slice(1)} exited with ${result.status}.` };
     }
 
     const extracted = extractWorktreeChange(context.workspaceRoot, worktreePath, node.scope ?? []);
     context.logger.saveDiff(node.id, extracted.diff);
-    context.logger.log(`Worker:${node.id}`, `Generated diff: ${extracted.operations.length} file ops, ${extracted.diff ? extracted.diff.split('\n').length : 0} diff lines`, "SUCCESS");
+    context.logger.log(logTag, `Generated diff: ${extracted.operations.length} file ops, ${extracted.diff ? extracted.diff.split('\n').length : 0} diff lines`, "SUCCESS");
 
     const diffArtifact = persistArtifact(context.missionDir, `diff-${safeFileName(node.id)}-${safeFileName(runId)}.patch`, extracted.diff);
     MissionEventsStore.appendEvent(context.eventsPath, context.missionId, {
@@ -662,7 +664,7 @@ async function reviewAndPromote(
     runKey: `batch-${wave}-${Date.now()}`,
     leaseId: `lease-${wave}-${Date.now()}`,
     epoch: String(wave),
-    expertId: "worker-batch",
+    expertId: "executor-batch",
   };
   context.journal.appendRunStarted(author);
   const reviewBroker = new StagedReviewBroker(context.journal);
@@ -910,7 +912,7 @@ async function publishRepairNodes(
     proposalId: proposalId(context.missionId, "repair", runtime.graph.revision),
     expectedRevision: runtime.graph.revision,
     author: "oma-controller",
-    reason: `Publish repair wave ${wave} after verified worker or gate failure.`,
+    reason: `Publish repair wave ${wave} after verified executor or gate failure.`,
     missionId: context.missionId,
     parentGraphHash: runtime.graphHash,
     operations,
@@ -992,7 +994,7 @@ function extractWorktreeChange(
   const untracked = splitNul(git(worktreePath, ["ls-files", "--others", "--exclude-standard", "-z"]));
   const paths = [...new Set([...tracked, ...untracked])].sort();
   if (paths.length === 0) {
-    throw new Error("Worker produced no Git diff or untracked file.");
+    throw new Error("Executor produced no Git diff or untracked file.");
   }
   const operations: ProposedOperation[] = [];
   for (const path of paths) {
@@ -1002,7 +1004,7 @@ function extractWorktreeChange(
     const sourceExists = existsSync(sourcePath);
     const worktreeExists = existsSync(worktreeFile);
     if (worktreeExists && lstatSync(worktreeFile).isSymbolicLink()) {
-      throw new Error(`Worker produced a symbolic link, which is forbidden: ${path}`);
+      throw new Error(`Executor produced a symbolic link, which is forbidden: ${path}`);
     }
     if (worktreeExists) {
       const content = readTextFile(worktreeFile, path);
@@ -1019,14 +1021,14 @@ function extractWorktreeChange(
         baseHash: sha256(readGitBlob(workspaceRoot, parentVersion, path)),
       });
     } else {
-      throw new Error(`Worker change references a missing file: ${path}`);
+      throw new Error(`Executor change references a missing file: ${path}`);
     }
   }
   const trackedDiff = git(worktreePath, ["diff", "--binary", "HEAD", "--"]);
   const untrackedDiff = untracked.map((path) => renderUntrackedDiff(worktreePath, path)).join("");
   const diff = `${trackedDiff}${untrackedDiff}`;
   if (diff.trim().length === 0) {
-    throw new Error("Worker did not produce a trackable Git diff.");
+    throw new Error("Executor did not produce a trackable Git diff.");
   }
   if (!parentVersion || parentVersion.length !== 40) {
     throw new Error("Unable to determine the clean parent Git revision.");
@@ -1040,7 +1042,7 @@ function combineChanges(workspaceRoot: string, changes: WorktreeChange[]): Chang
   const seen = new Set<string>();
   for (const operation of operations) {
     if (seen.has(operation.path)) {
-      throw new Error(`Concurrent workers proposed the same path: ${operation.path}`);
+      throw new Error(`Concurrent executors proposed the same path: ${operation.path}`);
     }
     seen.add(operation.path);
   }
@@ -1208,14 +1210,15 @@ function plannerPrompt(goal: string): string {
     "You are the planning expert for a real OMA mission.",
     `Goal: ${goal}`,
     "Inspect the repository read-only. Return JSON only, exactly {\"workItems\":[...]}",
-    "Each work item must contain id, title, scope (non-empty array of repo-relative files), dependsOn (array of item ids), persona (worker or fixer), and acceptance (non-empty string array).",
+    "Each work item must contain id, title, scope (non-empty array of repo-relative files), dependsOn (array of item ids), persona (executor or fixer), and acceptance (non-empty string array).",
     "Scopes must be exact files, must not overlap among concurrently independent work items, and every item must be independently buildable after its dependencies.",
   ].join("\n");
 }
 
-function workerPrompt(goal: string, node: GraphNode): string {
+function executorPrompt(goal: string, node: GraphNode): string {
+  const persona = node.executor?.persona ?? "executor";
   return [
-    "You are a worker in a verified OMA Graph Engineering mission.",
+    `You are an ${persona} in a verified OMA Graph Engineering mission.`,
     `Mission goal: ${goal}`,
     `Node id: ${node.id}`,
     `Node title: ${node.title}`,
@@ -1225,13 +1228,15 @@ function workerPrompt(goal: string, node: GraphNode): string {
   ].join("\n");
 }
 
+const workerPrompt = executorPrompt;
+
 function reviewerPrompt(diff: string, digest: string): string {
   return [
     "You are an independent adversarial reviewer.",
     `The exact staged diff SHA-256 is ${digest}.`,
     "Review only the diff below against correctness, security, scope and regression risk.",
     "Return JSON only: {\"verdict\":\"approved\"|\"rejected\",\"observations\":[\"...\"]}.",
-    "Do not edit files and do not assume a successful worker run proves correctness.",
+    "Do not edit files and do not assume a successful execution run proves correctness.",
     "--- BEGIN STAGED DIFF ---",
     diff,
     "--- END STAGED DIFF ---",
@@ -1348,11 +1353,11 @@ function renderUntrackedDiff(worktreePath: string, path: string): string {
     maxBuffer: 20 * 1024 * 1024,
   });
   if (result.status !== 1) {
-    throw new Error(`Unable to render untracked worker diff for ${path}: ${String(result.stderr ?? "").trim()}`);
+    throw new Error(`Unable to render untracked executor diff for ${path}: ${String(result.stderr ?? "").trim()}`);
   }
   const diff = result.stdout ?? "";
   if (diff.trim().length === 0) {
-    throw new Error(`Untracked worker file has no renderable diff: ${path}`);
+    throw new Error(`Untracked executor file has no renderable diff: ${path}`);
   }
   return diff;
 }
@@ -1375,7 +1380,7 @@ function splitNul(value: string): string[] {
 function assertScopePath(path: string, scope: string[]): void {
   validateRepoPath(path);
   if (!scope.includes(path)) {
-    throw new Error(`Worker modified '${path}', outside its declared graph scope.`);
+    throw new Error(`Executor modified '${path}', outside its declared graph scope.`);
   }
 }
 

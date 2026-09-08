@@ -136,6 +136,7 @@ export class MissionProjectionEngine {
     };
 
     const expertsRegistered: Record<string, ResolvedCapability> = {
+      orchestrator: CapabilityResolver.resolve("orchestrator"),
       planner: CapabilityResolver.resolve("planner"),
       explorer: CapabilityResolver.resolve("explorer"),
       executor: CapabilityResolver.resolve("executor"),
