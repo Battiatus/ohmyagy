@@ -104,7 +104,7 @@ export class BenchmarkRunner {
         const driverResult = await driver.invoke({
           worktreeDir: trialWorktree,
           contractPrompt: `${sharedBaseline.taskPrompt}\nNo external gate enforcement.`,
-          persona: "worker",
+          persona: "executor",
           modelOverride: sharedBaseline.modelSlug,
           reasoningEffort: sharedBaseline.reasoningEffort,
           timeoutMs: sharedBaseline.timeoutMs,
@@ -140,7 +140,7 @@ export class BenchmarkRunner {
         const driverResult = await driver.invoke({
           worktreeDir: trialWorktree,
           contractPrompt: `${sharedBaseline.taskPrompt}\nFollow skills guidance for mathematical edge cases.`,
-          persona: "worker",
+          persona: "executor",
           modelOverride: sharedBaseline.modelSlug,
           reasoningEffort: sharedBaseline.reasoningEffort,
           timeoutMs: sharedBaseline.timeoutMs,

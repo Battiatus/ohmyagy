@@ -130,7 +130,7 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
         title: "Item 1",
         scope: ["src/a.ts"],
         dependsOn: [],
-        roleRequired: "worker",
+        roleRequired: "executor",
         acceptanceCriteria: ["AC1"],
       });
 
@@ -164,16 +164,16 @@ describe("OMA Empirical Adversarial Stress Test Suite (m5_challenger_1)", () => 
         title: "Math Work Item",
         scope: ["src/math.ts"],
         dependsOn: [],
-        roleRequired: "worker",
+        roleRequired: "executor",
         acceptanceCriteria: ["math working"],
       });
 
       // Dangling run started but never finished (simulating sudden SIGKILL / crash)
       MissionEventsStore.appendEvent(eventsPath, danglingMissionId, {
         type: "run_started",
-        runId: "run-work-math-worker-01",
+        runId: "run-work-math-executor-01",
         workItemId: "work-math",
-        expertId: "worker",
+        expertId: "executor",
         model: "gemini-3.7-flash",
         effort: "medium",
       });

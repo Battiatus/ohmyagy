@@ -334,7 +334,7 @@ export class DynamicConvergenceEngine {
           title: item.title,
           scope: item.filesModified,
           dependsOn: [],
-          roleRequired: currentWave === 1 ? "worker" : "fixer",
+          roleRequired: currentWave === 1 ? "executor" : "fixer",
           acceptanceCriteria: ["clean_diff", "tests_pass"],
         });
 
@@ -353,7 +353,7 @@ export class DynamicConvergenceEngine {
       const waveProposals: WorkItemChangeProposal[] = [];
 
       for (const mat of materialized) {
-        const persona = currentWave === 1 ? "worker" : "fixer";
+        const persona = currentWave === 1 ? "executor" : "fixer";
         const runId = generateDeterministicRunId(mat.workItemId, persona, currentWave);
         let worktreePath: string;
 

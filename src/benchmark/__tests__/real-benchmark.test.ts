@@ -62,7 +62,7 @@ class BenchmarkDriver implements IAgyDriver {
           title: "Change target value",
           scope: ["src/value.txt"],
           dependsOn: [],
-          persona: "worker",
+          persona: "executor",
           acceptance: ["Target value is after."],
         }],
       });

@@ -164,7 +164,7 @@ async function executeTrial(input: {
       : manifest.task.prompt;
     const result = await driver.invoke({
       contractPrompt: prompt,
-      persona: "worker",
+      persona: "executor",
       worktreeDir: trialRoot,
       timeoutMs: manifest.timeoutMs,
       modelOverride: manifest.model,

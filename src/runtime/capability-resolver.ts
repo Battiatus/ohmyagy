@@ -7,7 +7,8 @@ export type VisionRole =
   | "verifier";
 
 export const ROLE_ALIASES: Record<string, string> = {
-  executor: "worker",
+  worker: "executor",
+  executor: "executor",
   orchestrator: "session",
 };
 
@@ -66,9 +67,9 @@ export class CapabilityResolver {
       tools: ["view_file", "grep_search", "find_by_name", "list_dir"],
       readOnly: true,
     },
-    worker: {
-      id: "worker",
-      role: "worker",
+    executor: {
+      id: "executor",
+      role: "executor",
       taskKinds: ["implementation", "refactoring", "bugfix"],
       modelClass: "balanced",
       effort: "medium",
@@ -82,6 +83,9 @@ export class CapabilityResolver {
         "run_command",
       ],
       readOnly: false,
+    },
+    get worker() {
+      return this.executor;
     },
     reviewer: {
       id: "reviewer",
@@ -126,12 +130,17 @@ export class CapabilityResolver {
   ): ResolvedCapability {
     let expert: ExpertSpec;
     if (typeof spec === "string") {
-      const aliasTarget = ROLE_ALIASES[spec];
+      let role = spec;
+      if (role === "worker") {
+        role = "executor";
+      }
+      const aliasTarget = ROLE_ALIASES[role] ?? ROLE_ALIASES[spec];
       expert =
+        this.CORE_EXPERTS[role] ??
         this.CORE_EXPERTS[spec] ??
         (aliasTarget ? this.CORE_EXPERTS[aliasTarget] : undefined) ?? {
-          id: spec,
-          role: "worker",
+          id: role,
+          role: "executor",
           taskKinds: ["general"],
           modelClass: "balanced",
           effort: "medium",
@@ -145,10 +154,11 @@ export class CapabilityResolver {
     const modelSlug = overrides.modelOverride ?? this.DEFAULT_MODELS[expert.modelClass];
     const effort = overrides.effortOverride ?? expert.effort;
     const sandbox = expert.readOnly ? "read-only" : "workspace-write";
+    const agentName = typeof spec === "string" && spec === "worker" ? "worker" : expert.id;
 
     return {
       expertId: expert.id,
-      agentName: expert.id,
+      agentName,
       modelSlug,
       effort,
       sandbox,

@@ -56,7 +56,7 @@ interface PlannedWorkItem {
   title: string;
   scope: string[];
   dependsOn: string[];
-  persona: "worker" | "fixer";
+  persona: "executor" | "worker" | "fixer";
   acceptance: string[];
 }
 
@@ -509,7 +509,7 @@ async function runGraphMission(context: GraphMissionContext): Promise<RealMissio
         type: "run_finished",
         runId: change.runId,
         workItemId: change.node.id,
-        expertId: change.node.executor?.persona ?? "worker",
+        expertId: change.node.executor?.persona ?? "executor",
         status: "succeeded",
         durationMs: change.result.durationMs,
         stdoutHash: change.result.stdoutHash,
@@ -544,7 +544,7 @@ async function executeNode(
       type: "run_started",
       runId,
       workItemId: node.id,
-      expertId: node.executor?.persona ?? "worker",
+      expertId: node.executor?.persona ?? "executor",
       model: context.model ?? "default",
       effort: context.effort ?? "agy-default",
       worktreePath,
@@ -553,8 +553,8 @@ async function executeNode(
     const promptText = workerPrompt(context.goal, node);
     const workerRunLogger = context.logger.createRunLogger({
       runId,
-      expertId: node.executor?.persona ?? "worker",
-      persona: node.executor?.persona ?? "worker",
+      expertId: node.executor?.persona ?? "executor",
+      persona: node.executor?.persona ?? "executor",
       model: context.model,
       effort: context.effort,
       worktree: worktreePath,
@@ -563,7 +563,7 @@ async function executeNode(
 
     const result = await context.driver.invoke({
       contractPrompt: promptText,
-      persona: node.executor?.persona ?? "worker",
+      persona: node.executor?.persona ?? "executor",
       worktreeDir: worktreePath,
       timeoutMs: context.timeoutMs,
       modelOverride: context.model,
@@ -642,7 +642,7 @@ async function completeFailedBatch(
       type: "run_finished",
       runId: failure.runId,
       workItemId: entry.node.id,
-      expertId: entry.node.executor?.persona ?? "worker",
+      expertId: entry.node.executor?.persona ?? "executor",
       status: "failed",
       durationMs: 0,
       error: failure.reason,
@@ -1084,9 +1084,9 @@ function parsePlannerPlan(value: unknown): PlannedWorkItem[] {
       if (mapped === sourceIdToNodeId.get(itemId)) throw new Error(`Planner work item '${itemId}' depends on itself.`);
       return mapped;
     });
-    const persona = raw.persona === undefined ? "worker" : raw.persona;
-    if (persona !== "worker" && persona !== "fixer") {
-      throw new Error(`Planner work item '${raw.id}' has unsupported persona '${String(persona)}'.`);
+    const persona = raw.persona === undefined ? "executor" : raw.persona;
+    if (persona !== "executor" && persona !== "worker" && persona !== "fixer") {
+      throw new Error(`Planner work item '${raw.id}' has unsupported persona '${String(raw.persona)}'.`);
     }
     const acceptance = raw.acceptance === undefined
       ? ["The declared scope is implemented and external gates pass."]

@@ -39,7 +39,7 @@ export interface WorkItemDiscoveredPayload {
   title: string;
   scope: string[];
   dependsOn: string[];
-  roleRequired: "planner" | "explorer" | "worker" | "reviewer" | "fixer" | "verifier";
+  roleRequired: "planner" | "explorer" | "executor" | "worker" | "reviewer" | "fixer" | "verifier";
   acceptanceCriteria: string[];
 }
 
