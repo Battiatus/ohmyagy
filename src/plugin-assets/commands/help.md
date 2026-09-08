@@ -6,7 +6,8 @@ Present the OMA command palette. Do not call any tool; this is a static referenc
 
 Show the user this list:
 
-- `/oma:run <objective>` — start a new multi-agent mission for the objective.
+- `/oma:start <objective>` — **(recommended)** conduct a mission natively in this session: OMA reads the conversation, recalls project memory, aligns with you, then drives the graph here.
+- `/oma:run <objective>` — launch a detached, out-of-session mission (fire-and-forget); follow it with `/oma:status`.
 - `/oma:status [mission-id]` — live status of the active or named mission.
 - `/oma:list` — every mission in this workspace, most recent first.
 - `/oma:inspect [mission-id]` — provenance chain: artifacts, reviews, terminal verdict.
@@ -14,4 +15,4 @@ Show the user this list:
 - `/oma:doctor` — check the AntiGravity runtime and OMA plugin installation.
 - `/oma:help` — show this palette.
 
-Add that missions run with the plugin's installed quality gates and AGY's native model and effort defaults, so none of these commands need extra configuration.
+Add that `/oma:start` runs inside the conversation so the mission inherits full context and can be resumed from any future session via the Neural Brain, while `/oma:run` is the detached variant. Missions run with the plugin's installed quality gates and AGY's native model and effort defaults, so none of these commands need extra configuration.

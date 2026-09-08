@@ -42,6 +42,14 @@ export function installWorkspacePlugin(
   ];
   const hookPath = candidatesHook.find((p) => existsSync(p)) ?? candidatesHook[0];
 
+  const candidatesSummarizerHook = [
+    fileURLToPath(new URL("../brain/summarizer-hook.js", import.meta.url)),
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../dist/src/brain/summarizer-hook.js"),
+    fileURLToPath(new URL("../brain/summarizer-hook.ts", import.meta.url)),
+  ];
+  const summarizerHookPath =
+    candidatesSummarizerHook.find((p) => existsSync(p)) ?? candidatesSummarizerHook[0];
+
   const candidatesMcp = [
     fileURLToPath(new URL("../mcp/broker-server.js", import.meta.url)),
     resolve(dirname(fileURLToPath(import.meta.url)), "../../dist/src/mcp/broker-server.js"),
@@ -53,6 +61,7 @@ export function installWorkspacePlugin(
     throw new Error(`Build artifacts are missing: hookPath=${hookPath}, mcpServerPath=${mcpServerPath}`);
   }
   const hookCommand = antigravityCommand([process.execPath, hookPath]);
+  const summarizerHookCommand = antigravityCommand([process.execPath, summarizerHookPath]);
   const stagingDir = join(pluginsRoot, `.oma-install-${process.pid}`);
   if (existsSync(stagingDir)) {
     throw new Error(`Installer staging directory already exists: ${stagingDir}`);
@@ -86,6 +95,21 @@ export function installWorkspacePlugin(
                 type: "command",
                 command: hookCommand,
                 timeout: 10,
+              },
+            ],
+          },
+        ],
+      },
+      "oma-memory-summarizer": {
+        enabled: true,
+        Stop: [
+          {
+            matcher: "*",
+            hooks: [
+              {
+                type: "command",
+                command: summarizerHookCommand,
+                timeout: 30,
               },
             ],
           },
