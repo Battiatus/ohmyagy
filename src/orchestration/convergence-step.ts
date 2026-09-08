@@ -30,6 +30,22 @@ export interface ConvergenceStepResult {
 }
 
 /**
+ * Compares two progress vectors by value.
+ */
+export function areProgressVectorsEqual(a: ProgressVector, b: ProgressVector): boolean {
+  return (
+    a.hiddenTestsFailing === b.hiddenTestsFailing &&
+    a.hiddenTestsPassed === b.hiddenTestsPassed &&
+    a.visibleTestsFailing === b.visibleTestsFailing &&
+    a.visibleTestsPassed === b.visibleTestsPassed &&
+    a.gateFailures === b.gateFailures &&
+    a.openDiagnosticsCount === b.openDiagnosticsCount &&
+    a.acceptedWorkItems === b.acceptedWorkItems &&
+    a.totalWorkItems === b.totalWorkItems
+  );
+}
+
+/**
  * Pure evaluation of a single convergence step in Oh My Antigravity (OMA).
  *
  * Reconciles the Graph Engineering DAG state (ready/succeeded/failed nodes)
@@ -68,9 +84,20 @@ export function evaluateConvergenceStep(input: ConvergenceStepInput): Convergenc
   let fullHistory: ProgressVector[];
   if (input.progressHistory.length === 0) {
     fullHistory = [currentProgress];
+  } else if (input.currentRound !== undefined) {
+    // If currentRound is specified, check whether progressHistory already includes it
+    if (input.progressHistory.length < input.currentRound && input.currentProgress) {
+      fullHistory = [...input.progressHistory, input.currentProgress];
+    } else {
+      fullHistory = [...input.progressHistory];
+    }
   } else if (
     input.currentProgress &&
-    input.currentProgress !== input.progressHistory[input.progressHistory.length - 1]
+    input.currentProgress !== input.progressHistory[input.progressHistory.length - 1] &&
+    !areProgressVectorsEqual(
+      input.currentProgress,
+      input.progressHistory[input.progressHistory.length - 1],
+    )
   ) {
     fullHistory = [...input.progressHistory, input.currentProgress];
   } else {
@@ -101,7 +128,7 @@ export function evaluateConvergenceStep(input: ConvergenceStepInput): Convergenc
     currentProgress.visibleTestsFailing === 0 &&
     currentProgress.gateFailures === 0;
 
-  if (input.isIntegrated === true || isAllNodesSucceeded) {
+  if (input.isIntegrated === true || (input.isIntegrated !== false && isAllNodesSucceeded)) {
     return {
       readyNodes,
       progress: currentProgress,
@@ -161,8 +188,15 @@ export function evaluateConvergenceStep(input: ConvergenceStepInput): Convergenc
     };
   }
 
-  // Priority D: Terminal Failure (sinks failed with no ready nodes)
-  if (projection.status === "failed" && readyNodes.length === 0) {
+  // Priority D: Terminal Failure (failures detected with no ready or running nodes)
+  const hasNoActiveWork =
+    readyNodes.length === 0 && !projection.nodes.some((n) => n.state === "running");
+  const isTerminalFailure =
+    (projection.status === "failed" || projection.status === "stalled" || hasNoActiveWork) &&
+    failedNodes.length > 0 &&
+    readyNodes.length === 0;
+
+  if (isTerminalFailure) {
     return {
       readyNodes,
       progress: currentProgress,

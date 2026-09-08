@@ -274,4 +274,62 @@ describe("Orchestration MCP Tools (Phase 3: T3.4 - T3.7)", () => {
       });
     }, /Failed node 'non-existent-node' was not found/);
   });
+
+  it("T3.4: converge_step returns status 'failed' with isError false on terminal node failure", () => {
+    const node1 = makeAgentNode("task-verify");
+    callTool("graph_init", {
+      missionId: "test-mission",
+      nodes: [node1],
+      edges: [],
+    });
+
+    callTool("graph_mark_node", {
+      nodeId: "task-verify",
+      state: "running",
+      dispatchId: "disp-1",
+    });
+    callTool("graph_mark_node", {
+      nodeId: "task-verify",
+      state: "failed",
+      dispatchId: "disp-1",
+    });
+
+    const stepRes = callTool("converge_step", {});
+    assert.equal(stepRes.isError, false);
+    assert.equal(stepRes.structured.status, "failed");
+    assert.equal(stepRes.structured.convergenceStatus, "failed");
+    assert.ok(String(stepRes.structured.diagnosis).includes("Graph execution failed"));
+  });
+
+  it("T3.4: converge_step handles deserialized JSON currentProgress without premature stagnation", () => {
+    const node1 = makeAgentNode("task-core");
+    callTool("graph_init", {
+      missionId: "test-mission",
+      nodes: [node1],
+      edges: [],
+    });
+
+    const v1 = {
+      hiddenTestsFailing: 2,
+      hiddenTestsPassed: 0,
+      visibleTestsFailing: 1,
+      visibleTestsPassed: 0,
+      gateFailures: 1,
+      openDiagnosticsCount: 2,
+      acceptedWorkItems: 0,
+      totalWorkItems: 1,
+    };
+    const v2 = { ...v1 }; // 1 round of stagnation
+
+    // Both passed as distinct JSON object instances
+    const stepRes = callTool("converge_step", {
+      progressHistory: [v1, v2],
+      currentProgress: { ...v2 },
+      limits: { maxConsecutiveNoProgressRounds: 2 },
+    });
+
+    assert.equal(stepRes.isError, false);
+    assert.equal(stepRes.structured.status, "in_progress");
+    assert.equal(stepRes.structured.consecutiveNoProgressRounds, 1);
+  });
 });

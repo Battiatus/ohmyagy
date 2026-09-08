@@ -322,4 +322,187 @@ describe("evaluateConvergenceStep Unit Tests (T3.2)", () => {
     assert.equal(result.readyNodes.length, 0);
     assert.ok(result.diagnosis?.includes("Graph execution failed"));
   });
+
+  it("handles cloned or deserialized currentProgress without false stagnation blocking", () => {
+    const v1: ProgressVector = {
+      hiddenTestsFailing: 2,
+      hiddenTestsPassed: 1,
+      visibleTestsFailing: 1,
+      visibleTestsPassed: 1,
+      gateFailures: 1,
+      openDiagnosticsCount: 2,
+      acceptedWorkItems: 0,
+      totalWorkItems: 2,
+    };
+    const v2: ProgressVector = { ...v1 }; // 1 round of stagnation
+
+    // When currentProgress is passed as a cloned object (like from JSON / MCP),
+    // it must not be appended as a duplicate 3rd round
+    const result = evaluateConvergenceStep({
+      graph: simpleGraph,
+      events: [],
+      progressHistory: [v1, v2],
+      currentProgress: { ...v2 },
+      limits: defaultLimits,
+    });
+
+    assert.equal(result.status, "in_progress");
+    assert.equal(result.consecutiveNoProgressRounds, 1);
+    assert.equal(result.totalRounds, 2);
+  });
+
+  it("rejects succeeded status when isIntegrated is explicitly false despite nodes succeeded", () => {
+    const allSucceededGraph: ExecutionGraph = {
+      schemaVersion: 2,
+      graphId: "graph-ok",
+      revision: 1,
+      schedulerAuthorityId: "scheduler-1",
+      nodes: [
+        {
+          id: "task-done",
+          title: "Done task",
+          kind: "agent",
+          activation: "all",
+          completionAuthority: "broker",
+          completionAuthorityId: "oma-broker",
+        },
+      ],
+      edges: [],
+    };
+
+    const events: GraphEvent[] = [
+      {
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        graphId: "graph-ok",
+        graphRevision: 1,
+        graphHash: "hash-0",
+        nodeId: "task-done",
+        dispatchId: "disp-1",
+        authority: "scheduler",
+        authorityId: "scheduler-1",
+        previousHash: "prev-0",
+        eventHash: "ev-1",
+        eventType: "node_dispatched",
+      },
+      {
+        sequence: 2,
+        timestamp: new Date().toISOString(),
+        graphId: "graph-ok",
+        graphRevision: 1,
+        graphHash: "hash-0",
+        nodeId: "task-done",
+        dispatchId: "disp-1",
+        authority: "broker",
+        authorityId: "oma-broker",
+        previousHash: "ev-1",
+        eventHash: "ev-2",
+        eventType: "node_completed",
+        outcome: "success",
+        evidenceHash: "ev-done",
+      },
+    ];
+
+    const cleanProgress: ProgressVector = {
+      hiddenTestsFailing: 0,
+      hiddenTestsPassed: 2,
+      visibleTestsFailing: 0,
+      visibleTestsPassed: 2,
+      gateFailures: 0,
+      openDiagnosticsCount: 0,
+      acceptedWorkItems: 1,
+      totalWorkItems: 1,
+    };
+
+    // Even if graph succeeded and test counts are clean, explicit isIntegrated: false blocks succeeded
+    const result = evaluateConvergenceStep({
+      graph: allSucceededGraph,
+      events,
+      progressHistory: [cleanProgress],
+      limits: defaultLimits,
+      isIntegrated: false,
+    });
+
+    assert.notEqual(result.status, "succeeded");
+    assert.equal(result.status, "in_progress");
+  });
+
+  it("evaluates stalled graph with failed nodes and 0 ready nodes as failed", () => {
+    const blockedGraph: ExecutionGraph = {
+      schemaVersion: 2,
+      graphId: "graph-stalled",
+      revision: 1,
+      schedulerAuthorityId: "scheduler-1",
+      nodes: [
+        {
+          id: "task-a",
+          title: "Task A",
+          kind: "agent",
+          activation: "all",
+          completionAuthority: "broker",
+          completionAuthorityId: "oma-broker",
+        },
+        {
+          id: "task-b",
+          title: "Task B",
+          kind: "agent",
+          activation: "all",
+          completionAuthority: "broker",
+          completionAuthorityId: "oma-broker",
+        },
+      ],
+      edges: [
+        {
+          id: "edge-a-b",
+          from: "task-a",
+          to: "task-b",
+          when: "success",
+        },
+      ],
+    };
+
+    // Task A failed -> Task B is blocked -> 0 ready nodes, graph stalled with failure
+    const events: GraphEvent[] = [
+      {
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        graphId: "graph-stalled",
+        graphRevision: 1,
+        graphHash: "hash-0",
+        nodeId: "task-a",
+        dispatchId: "disp-a",
+        authority: "scheduler",
+        authorityId: "scheduler-1",
+        previousHash: "prev-0",
+        eventHash: "ev-a1",
+        eventType: "node_dispatched",
+      },
+      {
+        sequence: 2,
+        timestamp: new Date().toISOString(),
+        graphId: "graph-stalled",
+        graphRevision: 1,
+        graphHash: "hash-0",
+        nodeId: "task-a",
+        dispatchId: "disp-a",
+        authority: "broker",
+        authorityId: "oma-broker",
+        previousHash: "ev-a1",
+        eventHash: "ev-a2",
+        eventType: "node_completed",
+        outcome: "failure",
+        evidenceHash: "ev-fail",
+      },
+    ];
+
+    const result = evaluateConvergenceStep({
+      graph: blockedGraph,
+      events,
+      progressHistory: [],
+      limits: defaultLimits,
+    });
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.readyNodes.length, 0);
+  });
 });

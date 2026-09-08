@@ -42,6 +42,7 @@ export const ORCHESTRATION_SUCCESS_STATUSES = new Set([
   "status",
   "reported",
   "evaluated",
+  "failed",
 ]);
 
 export const ORCHESTRATION_TOOL_DEFINITIONS = [

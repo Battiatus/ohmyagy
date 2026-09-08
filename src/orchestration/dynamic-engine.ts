@@ -615,6 +615,7 @@ export class DynamicConvergenceEngine {
           );
           const isGitRepo =
             topLevelRes.status === 0 &&
+            typeof topLevelRes.stdout === "string" &&
             resolve(topLevelRes.stdout.trim()).toLowerCase() ===
               resolve(workspaceRoot).toLowerCase();
 
