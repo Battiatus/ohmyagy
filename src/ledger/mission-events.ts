@@ -15,6 +15,7 @@ export type MissionEventType =
   | "integration_attempted"
   | "wave_transitioned"
   | "wave_started"
+  | "round_started"
   | "terminal_verdict_rendered"
   | "mission_finished";
 
@@ -109,6 +110,10 @@ export interface WaveStartedPayload {
   waveIndex: number;
 }
 
+export interface RoundStartedPayload {
+  roundIndex: number;
+}
+
 export interface TerminalVerdictRenderedPayload {
   runId: string;
   status: "succeeded" | "failed";
@@ -134,6 +139,7 @@ export type MissionEventPayload =
   | ({ type: "integration_attempted" } & IntegrationAttemptedPayload)
   | ({ type: "wave_transitioned" } & WaveTransitionedPayload)
   | ({ type: "wave_started" } & WaveStartedPayload)
+  | ({ type: "round_started" } & RoundStartedPayload)
   | ({ type: "terminal_verdict_rendered" } & TerminalVerdictRenderedPayload)
   | ({ type: "mission_finished" } & MissionFinishedPayload);
 
@@ -315,17 +321,42 @@ export class MissionEventsStore {
           currentWave = e.toWave;
           break;
 
+        case "wave_started":
+          currentWave = e.waveIndex;
+          break;
+
+        case "round_started":
+          currentWave = e.roundIndex;
+          break;
+
         case "integration_attempted":
           if (e.status === "integrated") {
             progress.acceptedWorkItems = e.workItemsIntegrated.length;
+            for (const id of e.workItemsIntegrated) {
+              const item = workItems.get(id);
+              if (item) {
+                item.state = "accepted";
+              }
+            }
           } else if (e.status === "conflict_blocked") {
             status = "blocked";
           }
           break;
 
+        case "terminal_verdict_rendered":
+          status = e.status;
+          break;
+
         case "mission_finished":
-          status = e.finalStatus === "succeeded" ? "succeeded" : "failed";
+          status = e.finalStatus === "succeeded" ? "succeeded" : (e.finalStatus === "no_progress_blocked" ? "blocked" : "failed");
           progress = e.finalProgress;
+          if (e.finalStatus === "succeeded") {
+            for (const item of workItems.values()) {
+              if (item.state !== "failed" && item.state !== "blocked") {
+                item.state = "accepted";
+              }
+            }
+          }
           break;
       }
     }

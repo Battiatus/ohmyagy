@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { isRecord, sha256 } from "../ledger/canonical.js";
 import { GraphBroker, GraphBrokerError } from "../graph/broker.js";
 import { parseGraphProposal } from "../graph/proposal.js";
@@ -18,6 +19,8 @@ import {
   type GraphEvent,
   type GraphNode,
 } from "../graph/model.js";
+import { MissionEventsStore } from "../ledger/mission-events.js";
+import { eventsPathFor, findActiveMissionId, ensureMissionStarted } from "../mission/read-model.js";
 
 /**
  * MCP tool surface for the Execution Graph.
@@ -135,6 +138,7 @@ export const GRAPH_TOOL_DEFINITIONS = [
         operations: { type: "array" },
         rationale: { type: "object" },
         resourceBudgetsDelta: { type: "object" },
+        missionId: { type: "string" },
       },
     },
   },
@@ -189,6 +193,10 @@ export const GRAPH_TOOL_DEFINITIONS = [
           type: "string",
           description: "Raw evidence string used to compute evidenceHash if not provided.",
         },
+        missionId: {
+          type: "string",
+          description: "Optional mission identifier.",
+        },
       },
       required: ["nodeId", "state"],
     },
@@ -204,7 +212,40 @@ export const GRAPH_TOOL_DEFINITIONS = [
   },
 ] as const;
 
-function executeGraphInit(
+function resolveSessionMissionId(workspaceRoot: string, input: Record<string, unknown>): string {
+  if (typeof input.missionId === "string" && input.missionId.trim().length > 0) {
+    return input.missionId.trim();
+  }
+  return findActiveMissionId(workspaceRoot) ?? "oma-session";
+}
+
+
+function ensureWorkItemDiscovered(
+  eventsPath: string,
+  missionId: string,
+  node: GraphNode,
+  edges: GraphEdge[],
+): void {
+  try {
+    const existing = MissionEventsStore.readEvents(eventsPath);
+    const discovered = existing.some(
+      (e) => e.type === "work_item_discovered" && (e as any).workItemId === node.id,
+    );
+    if (!discovered) {
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "work_item_discovered",
+        workItemId: node.id,
+        title: node.title,
+        scope: node.scope ?? [],
+        dependsOn: edges.filter((e) => e.to === node.id).map((e) => e.from),
+        roleRequired: (node.executor?.persona as any) ?? "executor",
+        acceptanceCriteria: (node.acceptance ?? []).map((a) => a.description),
+      });
+    }
+  } catch {}
+}
+
+export function executeGraphInit(
   workspaceRoot: string,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -269,6 +310,12 @@ function executeGraphInit(
   }
 
   const runtime = initializeGraphStore(workspaceRoot);
+  writeFileSync(join(paths.graphDir, "session-mission-id"), missionId, "utf8");
+  const eventsPath = ensureMissionStarted(workspaceRoot, missionId, goal);
+
+  for (const node of runtime.graph.nodes) {
+    ensureWorkItemDiscovered(eventsPath, missionId, node, runtime.graph.edges);
+  }
 
   if (!isCustomNodes && runtime.graph.nodes.some((n: GraphNode) => n.id === "bootstrap")) {
     const dispatchId = "dispatch-bootstrap";
@@ -287,6 +334,30 @@ function executeGraphInit(
       outcome: "success",
       evidenceHash: sha256(`bootstrap:${missionId}`),
     });
+    try {
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "run_started",
+        runId: dispatchId,
+        workItemId: "bootstrap",
+        expertId: "scheduler",
+        model: "scheduler",
+        effort: "low",
+      });
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "run_finished",
+        runId: dispatchId,
+        workItemId: "bootstrap",
+        expertId: "scheduler",
+        status: "succeeded",
+        durationMs: 0,
+      });
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "integration_attempted",
+        waveIndex: 1,
+        workItemsIntegrated: ["bootstrap"],
+        status: "integrated",
+      });
+    } catch {}
   }
 
   return {
@@ -302,7 +373,7 @@ function executeGraphInit(
   };
 }
 
-function executeGraphPropose(
+export function executeGraphPropose(
   workspaceRoot: string,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -329,7 +400,7 @@ function executeGraphPropose(
   };
 }
 
-function executeGraphApply(
+export function executeGraphApply(
   workspaceRoot: string,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -345,6 +416,15 @@ function executeGraphApply(
       result.cyclePath,
     );
   }
+
+  try {
+    const missionId = resolveSessionMissionId(workspaceRoot, input);
+    const eventsPath = ensureMissionStarted(workspaceRoot, missionId);
+    for (const node of result.graph.nodes) {
+      ensureWorkItemDiscovered(eventsPath, missionId, node, result.graph.edges);
+    }
+  } catch {}
+
   return {
     status: "applied",
     success: true,
@@ -355,7 +435,7 @@ function executeGraphApply(
   };
 }
 
-function executeGraphReadyNodes(
+export function executeGraphReadyNodes(
   workspaceRoot: string,
 ): Record<string, unknown> {
   const runtime = loadGraphRuntime(workspaceRoot);
@@ -375,7 +455,7 @@ function executeGraphReadyNodes(
   };
 }
 
-function executeGraphMarkNode(
+export function executeGraphMarkNode(
   workspaceRoot: string,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -418,6 +498,10 @@ function executeGraphMarkNode(
       ? input.dispatchId.trim()
       : projectedNode.dispatchId ?? `dispatch-${nodeId}-${Date.now()}`;
 
+  const missionId = resolveSessionMissionId(workspaceRoot, input);
+  const eventsPath = ensureMissionStarted(workspaceRoot, missionId);
+  ensureWorkItemDiscovered(eventsPath, missionId, targetNode, runtime.graph.edges);
+
   let lastEvent: GraphEvent;
 
   if (state === "running") {
@@ -436,6 +520,16 @@ function executeGraphMarkNode(
       dispatchId,
       authorityId: runtime.graph.schedulerAuthorityId,
     });
+    try {
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "run_started",
+        runId: dispatchId,
+        workItemId: nodeId,
+        expertId: targetNode.executor?.persona ?? targetNode.completionAuthority,
+        model: "session-native",
+        effort: "default",
+      });
+    } catch {}
   } else if (state === "succeeded" || state === "completed" || state === "failed") {
     const outcome = state === "failed" || input.outcome === "failure" ? "failure" : "success";
 
@@ -476,6 +570,24 @@ function executeGraphMarkNode(
       authorityId,
       evidenceHash,
     });
+    try {
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "run_finished",
+        runId: dispatchId,
+        workItemId: nodeId,
+        expertId: targetNode.executor?.persona ?? targetNode.completionAuthority,
+        status: outcome === "success" ? "succeeded" : "failed",
+        durationMs: typeof input.durationMs === "number" ? input.durationMs : 0,
+      });
+      if (outcome === "success") {
+        MissionEventsStore.appendEvent(eventsPath, missionId, {
+          type: "integration_attempted",
+          waveIndex: 1,
+          workItemsIntegrated: [nodeId],
+          status: "integrated",
+        });
+      }
+    } catch {}
   } else {
     throw new Error(`Unsupported state: ${state}`);
   }
@@ -494,7 +606,7 @@ function executeGraphMarkNode(
   };
 }
 
-function executeGraphInspect(
+export function executeGraphInspect(
   workspaceRoot: string,
 ): Record<string, unknown> {
   const runtime = loadGraphRuntime(workspaceRoot);

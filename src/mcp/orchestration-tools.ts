@@ -5,9 +5,9 @@ import { GraphBroker, GraphBrokerError } from "../graph/broker.js";
 import type { GraphProposal } from "../graph/proposal.js";
 import { projectGraph, type ProjectedNode } from "../graph/kernel.js";
 import { graphPaths, loadGraphRuntime, verifyGraphStore } from "../graph/store.js";
-import type { ExecutionGraph, GraphEdge, GraphNode } from "../graph/model.js";
+import type { GraphEdge, GraphNode } from "../graph/model.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
-import { findActiveMissionId } from "../mission/read-model.js";
+import { eventsPathFor, findActiveMissionId, ensureMissionStarted } from "../mission/read-model.js";
 import {
   evaluateConvergenceStep,
   type ConvergenceStepResult,
@@ -181,7 +181,7 @@ function resolveMissionId(workspaceRoot: string, input: unknown): string {
 }
 
 function readProgressHistoryFromEvents(workspaceRoot: string, missionId: string): ProgressVector[] {
-  const eventsPath = join(workspaceRoot, ".oma", "missions", missionId, "events.jsonl");
+  const eventsPath = eventsPathFor(workspaceRoot, missionId);
   if (!existsSync(eventsPath)) return [];
   try {
     const events = MissionEventsStore.readEvents(eventsPath);
@@ -256,6 +256,61 @@ export function executeConvergeStep(
     isIntegrated,
   });
 
+  const eventsPath = ensureMissionStarted(workspaceRoot, missionId);
+  const effectiveRound = currentRound ?? runtime.graph.revision ?? 1;
+
+  try {
+    const existingEvents = MissionEventsStore.readEvents(eventsPath);
+    const roundAlreadyStarted = existingEvents.some(
+      (e) => e.type === "round_started" && (e as any).roundIndex === effectiveRound,
+    );
+    if (!roundAlreadyStarted) {
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "round_started",
+        roundIndex: effectiveRound,
+      });
+    }
+
+    const gateStatus =
+      stepResult.progress.hiddenTestsFailing === 0 &&
+      stepResult.progress.visibleTestsFailing === 0 &&
+      stepResult.progress.gateFailures === 0
+        ? "passed"
+        : "failed";
+
+    MissionEventsStore.appendEvent(eventsPath, missionId, {
+      type: "gate_evaluated",
+      gateId: "objective-judge-gate",
+      status: gateStatus,
+      progressVector: stepResult.progress,
+      durationMs: 0,
+      diagnostics: stepResult.diagnosis ? [stepResult.diagnosis] : [],
+    });
+
+    if (
+      stepResult.status === "succeeded" ||
+      stepResult.status === "failed" ||
+      stepResult.status === "no_progress_blocked" ||
+      stepResult.status === "budget_exhausted"
+    ) {
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "terminal_verdict_rendered",
+        runId: `terminal-${missionId}`,
+        status: stepResult.status === "succeeded" ? "succeeded" : "failed",
+        verdictHash: sha256(JSON.stringify(stepResult.progress)),
+      });
+
+      MissionEventsStore.appendEvent(eventsPath, missionId, {
+        type: "mission_finished",
+        finalStatus: stepResult.status,
+        totalDurationMs: 0,
+        finalProgress: stepResult.progress,
+      });
+    }
+  } catch {
+    // Fail-open for mission events recording during converge_step
+  }
+
   // Ingest convergence step and graph state into the Brain (fail-open)
   try {
     const shouldClose = !injectedBrain;
@@ -267,9 +322,10 @@ export function executeConvergeStep(
         brain,
         missionId,
         workspaceRoot,
+        eventsPath,
         graph: runtime.graph,
         graphEvents,
-        roundNumber: currentRound,
+        roundNumber: effectiveRound,
       });
     } finally {
       if (shouldClose) {
@@ -438,21 +494,19 @@ export function executeGraphReplan(
     );
   }
 
-  // Optionally record in mission journal if mission events exist
-  const eventsPath = join(workspaceRoot, ".oma", "missions", missionId, "events.jsonl");
-  if (existsSync(eventsPath)) {
-    try {
-      MissionEventsStore.appendEvent(eventsPath, missionId, {
-        type: "work_item_discovered",
-        workItemId: targetNodeId,
-        title: newNode.title,
-        scope: newNode.scope ?? [],
-        dependsOn: [failedNode.id],
-        roleRequired: role,
-        acceptanceCriteria: (newNode.acceptance ?? []).map((c) => c.description),
-      });
-    } catch {}
-  }
+  // Record in mission journal
+  const eventsPath = ensureMissionStarted(workspaceRoot, missionId);
+  try {
+    MissionEventsStore.appendEvent(eventsPath, missionId, {
+      type: "work_item_discovered",
+      workItemId: targetNodeId,
+      title: newNode.title,
+      scope: newNode.scope ?? [],
+      dependsOn: [failedNode.id],
+      roleRequired: role,
+      acceptanceCriteria: (newNode.acceptance ?? []).map((c: { description: string }) => c.description),
+    });
+  } catch {}
 
   // Project updated graph to check if the new node is immediately ready
   const updatedRuntime = loadGraphRuntime(workspaceRoot);

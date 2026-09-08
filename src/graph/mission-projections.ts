@@ -233,14 +233,25 @@ export class MissionProjectionEngine {
           break;
 
         case "run_finished":
-          const targetRun = runs[e.runId];
-          if (targetRun) {
+          if (!runs[e.runId]) {
+            runs[e.runId] = {
+              runId: e.runId,
+              workItemId: e.workItemId,
+              expertId: e.expertId,
+              model: "default",
+              effort: "default",
+              status: e.status,
+              durationMs: e.durationMs,
+              stdoutHash: e.stdoutHash,
+            };
+          } else {
+            const targetRun = runs[e.runId];
             targetRun.status = e.status;
             targetRun.durationMs = e.durationMs;
             targetRun.stdoutHash = e.stdoutHash;
           }
           const targetWorkItem = workItems[e.workItemId];
-          if (targetWorkItem && targetWorkItem.activeRunId === e.runId) {
+          if (targetWorkItem && (targetWorkItem.activeRunId === e.runId || !targetWorkItem.activeRunId)) {
             if (e.status === "succeeded") {
               targetWorkItem.state = "reviewed";
             } else if (e.status === "failed" || e.status === "interrupted" || e.status === "timed_out") {
@@ -284,24 +295,54 @@ export class MissionProjectionEngine {
           progress = e.progressVector;
           break;
 
+        case "wave_started":
+          currentWave = e.waveIndex;
+          break;
+
+        case "round_started":
+          currentWave = e.roundIndex;
+          break;
+
         case "wave_transitioned":
           currentWave = e.toWave;
           break;
 
         case "integration_attempted":
-          if (e.status === "conflict_blocked") {
+          if (e.status === "integrated") {
+            for (const wiId of e.workItemsIntegrated) {
+              if (workItems[wiId]) {
+                workItems[wiId].state = "accepted";
+              }
+            }
+          } else if (e.status === "conflict_blocked") {
             status = "blocked";
           }
           break;
 
+        case "terminal_verdict_rendered":
+          terminalVerdict = {
+            status: e.status,
+            commitSha: e.commitSha,
+            finalProgress: progress,
+          };
+          status = e.status;
+          break;
+
         case "mission_finished":
-          status = e.finalStatus === "succeeded" ? "succeeded" : "failed";
+          status = e.finalStatus === "succeeded" ? "succeeded" : (e.finalStatus === "no_progress_blocked" ? "blocked" : "failed");
           progress = e.finalProgress;
           terminalVerdict = {
             status: e.finalStatus === "succeeded" ? "succeeded" : "failed",
             commitSha: e.integratedCommitSha,
             finalProgress: e.finalProgress,
           };
+          if (e.finalStatus === "succeeded") {
+            for (const wi of Object.values(workItems)) {
+              if (wi.state !== "failed" && wi.state !== "blocked") {
+                wi.state = "accepted";
+              }
+            }
+          }
           break;
       }
     }

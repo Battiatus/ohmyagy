@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { MissionEventsStore } from "../ledger/mission-events.js";
 import { MissionProjectionEngine } from "../graph/mission-projections.js";
@@ -26,12 +26,33 @@ export interface MissionStatusSummary {
   terminalVerdict: MissionProjection["provenance"]["terminalVerdict"] | null;
 }
 
-function missionsDir(workspaceRoot: string): string {
+export function missionsDir(workspaceRoot: string): string {
   return join(workspaceRoot, ".oma", "missions");
 }
 
-function eventsPathFor(workspaceRoot: string, missionId: string): string {
+export function eventsPathFor(workspaceRoot: string, missionId: string): string {
   return join(missionsDir(workspaceRoot), missionId, "events.jsonl");
+}
+
+export function ensureMissionStarted(workspaceRoot: string, missionId: string, goal?: string): string {
+  const eventsPath = eventsPathFor(workspaceRoot, missionId);
+  let hasStarted = false;
+  if (existsSync(eventsPath)) {
+    try {
+      const existing = MissionEventsStore.readEvents(eventsPath);
+      hasStarted = existing.some((e) => e.type === "mission_started");
+    } catch {}
+  }
+  if (!hasStarted) {
+    MissionEventsStore.appendEvent(eventsPath, missionId, {
+      type: "mission_started",
+      workflowDigest: "session-native-graph-workflow-v2",
+      rulebookRevision: "session-native-v2",
+      goal: goal ?? `Session-native mission ${missionId}`,
+      totalBudgets: { maxRounds: 5, maxTimeMs: 300_000 },
+    });
+  }
+  return eventsPath;
 }
 
 /** Project a single mission from its durable journal. Throws when the mission is unknown. */
@@ -70,6 +91,40 @@ export function listMissions(workspaceRoot: string): MissionListEntry[] {
 
 /** The most recently touched in-progress mission, if any. */
 export function findActiveMissionId(workspaceRoot: string): string | undefined {
+  // 1. Session-native run actively recorded in .oma/graph/ takes precedence
+  try {
+    const sessionMissionIdFile = join(workspaceRoot, ".oma", "graph", "session-mission-id");
+    let sessionMissionId: string | undefined;
+    if (existsSync(sessionMissionIdFile)) {
+      const content = readFileSync(sessionMissionIdFile, "utf8").trim();
+      if (content.length > 0) {
+        sessionMissionId = content;
+      }
+    }
+    if (!sessionMissionId) {
+      const graphDefPath = join(workspaceRoot, ".oma", "graph", "execution-graph.json");
+      if (existsSync(graphDefPath)) {
+        const raw = JSON.parse(readFileSync(graphDefPath, "utf8")) as { graphId?: string };
+        if (typeof raw?.graphId === "string" && raw.graphId.startsWith("graph-")) {
+          sessionMissionId = raw.graphId.slice(6);
+        }
+      }
+    }
+
+    if (sessionMissionId) {
+      const eventsPath = eventsPathFor(workspaceRoot, sessionMissionId);
+      if (existsSync(eventsPath)) {
+        const projection = MissionProjectionEngine.project(MissionEventsStore.readEvents(eventsPath));
+        if (projection.status === "in_progress") {
+          return sessionMissionId;
+        }
+      }
+    }
+  } catch {
+    // Fail-open on filesystem or parse errors
+  }
+
+  // 2. Discover most recently modified in-progress mission from .oma/missions/
   return listMissions(workspaceRoot).find((entry) => entry.status === "in_progress")?.missionId;
 }
 
