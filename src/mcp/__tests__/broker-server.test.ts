@@ -249,6 +249,7 @@ test("T2.3: broker exposes and executes plan_route through MCP stdio protocol", 
       initializeRequest(1),
       toolCall(2, "plan_route", { mode: "bugfix" }),
       toolCall(3, "plan_route", { mode: "diagnostic" }),
+      toolCall(4, "plan_route", { mode: "" }),
     ]);
 
     const bugfixResult = resultFor(responses, 2);
@@ -264,6 +265,12 @@ test("T2.3: broker exposes and executes plan_route through MCP stdio protocol", 
     assert.equal(diagResult.structuredContent.status, "routed");
     assert.equal(diagResult.structuredContent.mode, "diagnostic");
     assert.deepEqual(diagResult.structuredContent.roles, ["explorer", "reviewer"]);
+
+    const invalidResult = resultFor(responses, 4);
+    assert.ok(isRecord(invalidResult.structuredContent));
+    assert.equal(invalidResult.isError, true);
+    assert.equal(invalidResult.structuredContent.status, "rejected");
+    assert.ok(String(invalidResult.structuredContent.reason).includes("plan_route requires a non-empty 'mode' string"));
   } finally {
     rmSync(fixture.container, { recursive: true, force: true });
   }

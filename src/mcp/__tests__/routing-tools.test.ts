@@ -139,4 +139,41 @@ test("T2.3: executePlanRoute() validates input and throws on invalid arguments",
     () => executePlanRoute({ mode: 123 }),
     /plan_route requires a non-empty 'mode' string/u,
   );
+  assert.throws(
+    () => executePlanRoute({ mode: "bugfix", promptOverlay: 123 }),
+    /plan_route 'promptOverlay' must be a string/u,
+  );
+  assert.throws(
+    () => executePlanRoute({ mode: "bugfix", sandbox: "root" }),
+    /plan_route 'sandbox' must be either 'workspace-write' or 'read-only'/u,
+  );
+  assert.throws(
+    () => executePlanRoute({ mode: "bugfix", extraGates: "not-an-array" }),
+    /plan_route 'extraGates' must be an array/u,
+  );
+  assert.throws(
+    () => executePlanRoute({ mode: "bugfix", extraGates: [{}] }),
+    /must be an object with non-empty 'id' and 'program'/u,
+  );
+  assert.throws(
+    () => executePlanRoute({ mode: "bugfix", extraGates: [{ id: "g1", program: "p1", args: [123] }] }),
+    /args' must be an array of strings/u,
+  );
+});
+
+test("T2.3: executePlanRoute() supports sandbox override and prototype collision modes", () => {
+  const customSandbox = executePlanRoute({ mode: "bugfix", sandbox: "read-only" });
+  assert.equal(customSandbox.status, "routed");
+  assert.equal(customSandbox.mode, "bugfix");
+  assert.equal(customSandbox.modeConfig.sandbox, "read-only");
+
+  // Prototype keys as mode:
+  const ctor = executePlanRoute({ mode: "constructor" });
+  assert.equal(ctor.status, "routed");
+  assert.equal(ctor.mode, "feature");
+  assert.deepEqual(ctor.roles, ["planner", "explorer", "executor", "reviewer", "verifier"]);
+
+  const proto = executePlanRoute({ mode: "__proto__" });
+  assert.equal(proto.status, "routed");
+  assert.equal(proto.mode, "feature");
 });

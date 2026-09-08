@@ -25,14 +25,19 @@ export const ROUTING_TOOL_DEFINITIONS = [
   {
     name: "plan_route",
     description:
-      "Select the canonical subset of roles and configuration overlay (prompt overlay, sandbox, extra gates) appropriate for a requested mission mode (canonical: bugfix, feature, diagnostic, infra, pm; also accepts debug, refactor, review, project-management, exploration).",
+      "Select the canonical subset of roles and configuration overlay (prompt overlay, sandbox, extra gates) appropriate for a requested mission mode (canonical: bugfix, feature, diagnostic, infra, pm; also accepts aliases debug, fix, refactor, review, project-management, exploration).",
     inputSchema: {
       type: "object",
       properties: {
         mode: {
           type: "string",
           description:
-            "Mission mode (canonical: bugfix, feature, diagnostic, infra, pm; also accepts aliases debug, refactor, review, project-management, exploration).",
+            "Mission mode (canonical: bugfix, feature, diagnostic, infra, pm; also accepts aliases debug, fix, refactor, review, project-management, exploration).",
+        },
+        sandbox: {
+          type: "string",
+          enum: ["workspace-write", "read-only"],
+          description: "Optional sandbox constraint override ('workspace-write' or 'read-only').",
         },
         extraGates: {
           type: "array",
@@ -86,15 +91,66 @@ export function executePlanRoute(input: unknown): PlanRouteOutput {
   const canonicalMode = normalizeMode(requestedMode);
   const roles = rolesForMode(requestedMode);
 
-  let overrides: Partial<ModeConfig> | undefined;
-  if (typeof input.promptOverlay === "string" || Array.isArray(input.extraGates)) {
-    overrides = {
-      ...(typeof input.promptOverlay === "string" ? { promptOverlay: input.promptOverlay } : {}),
-      ...(Array.isArray(input.extraGates) ? { extraGates: input.extraGates as OracleGate[] } : {}),
-    };
+  const overrides: Partial<ModeConfig> = {};
+
+  if (input.promptOverlay !== undefined) {
+    if (typeof input.promptOverlay !== "string") {
+      throw new Error("plan_route 'promptOverlay' must be a string if provided.");
+    }
+    overrides.promptOverlay = input.promptOverlay;
   }
 
-  const modeConfig = configForMode(requestedMode, overrides);
+  if (input.sandbox !== undefined) {
+    if (input.sandbox !== "workspace-write" && input.sandbox !== "read-only") {
+      throw new Error("plan_route 'sandbox' must be either 'workspace-write' or 'read-only'.");
+    }
+    overrides.sandbox = input.sandbox;
+  }
+
+  if (input.extraGates !== undefined) {
+    if (!Array.isArray(input.extraGates)) {
+      throw new Error("plan_route 'extraGates' must be an array of OracleGate objects.");
+    }
+    const sanitizedGates: OracleGate[] = [];
+    for (let i = 0; i < input.extraGates.length; i++) {
+      const gate = input.extraGates[i];
+      if (
+        !isRecord(gate) ||
+        typeof gate.id !== "string" ||
+        !gate.id.trim() ||
+        typeof gate.program !== "string" ||
+        !gate.program.trim()
+      ) {
+        throw new Error(
+          `plan_route 'extraGates[${i}]' must be an object with non-empty 'id' and 'program' string properties.`,
+        );
+      }
+      if (
+        gate.args !== undefined &&
+        (!Array.isArray(gate.args) || !gate.args.every((a) => typeof a === "string"))
+      ) {
+        throw new Error(`plan_route 'extraGates[${i}].args' must be an array of strings.`);
+      }
+      if (
+        gate.timeoutMs !== undefined &&
+        (!Number.isFinite(gate.timeoutMs) || Number(gate.timeoutMs) <= 0)
+      ) {
+        throw new Error(`plan_route 'extraGates[${i}].timeoutMs' must be a positive number.`);
+      }
+      sanitizedGates.push({
+        id: gate.id.trim(),
+        program: gate.program.trim(),
+        args: Array.isArray(gate.args) ? [...gate.args] : [],
+        timeoutMs: Number(gate.timeoutMs ?? 10_000),
+      });
+    }
+    overrides.extraGates = sanitizedGates;
+  }
+
+  const modeConfig = configForMode(
+    requestedMode,
+    Object.keys(overrides).length > 0 ? overrides : undefined,
+  );
 
   return {
     status: "routed",

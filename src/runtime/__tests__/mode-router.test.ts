@@ -190,3 +190,90 @@ test("T2.2: configForMode() merges custom overrides cleanly", () => {
   // Keeps original role overlays when not overridden
   assert.ok(overridden.rolePromptOverlays?.executor);
 });
+
+test("T2.1: prototype collision strings do not throw and fall back safely to feature", () => {
+  const prototypeCollisionKeys = [
+    "constructor",
+    "__proto__",
+    "toString",
+    "valueOf",
+    "hasOwnProperty",
+    "isPrototypeOf",
+  ];
+
+  for (const key of prototypeCollisionKeys) {
+    // 1. normalizeMode must fall back to 'feature' string without returning prototype methods
+    const normalized = normalizeMode(key);
+    assert.equal(normalized, "feature");
+
+    // 2. rolesForMode must not throw TypeError and must return feature roles
+    const roles = rolesForMode(key);
+    assert.deepEqual(roles, [
+      "planner",
+      "explorer",
+      "executor",
+      "reviewer",
+      "verifier",
+    ]);
+
+    // 3. configForMode must safely return feature config with mode === 'feature'
+    const config = configForMode(key);
+    assert.equal(config.mode, "feature");
+    assert.equal(config.sandbox, "workspace-write");
+  }
+});
+
+test("T2.1: extended aliases (fix, snake_case, explore) map to canonical modes", () => {
+  assert.equal(normalizeMode("fix"), "bugfix");
+  assert.deepEqual(rolesForMode("fix"), ["planner", "executor", "verifier"]);
+
+  assert.equal(normalizeMode("bug_fix"), "bugfix");
+  assert.deepEqual(rolesForMode("bug_fix"), ["planner", "executor", "verifier"]);
+
+  assert.equal(normalizeMode("bug-fix"), "bugfix");
+  assert.deepEqual(rolesForMode("bug-fix"), ["planner", "executor", "verifier"]);
+
+  assert.equal(normalizeMode("postmortem"), "diagnostic");
+  assert.deepEqual(rolesForMode("postmortem"), ["explorer", "reviewer"]);
+
+  assert.equal(normalizeMode("post_mortem"), "diagnostic");
+  assert.deepEqual(rolesForMode("post_mortem"), ["explorer", "reviewer"]);
+
+  assert.equal(normalizeMode("project_management"), "pm");
+  assert.deepEqual(rolesForMode("project_management"), ["planner", "orchestrator"]);
+
+  assert.equal(normalizeMode("projectmanagement"), "pm");
+  assert.deepEqual(rolesForMode("projectmanagement"), ["planner", "orchestrator"]);
+});
+
+test("T2.2: configForMode() deduplicates extraGates by id", () => {
+  const initialGate = {
+    id: "gate-a",
+    program: "npm",
+    args: ["test"],
+    timeoutMs: 1000,
+  };
+  const replacementGate = {
+    id: "gate-a",
+    program: "bun",
+    args: ["test"],
+    timeoutMs: 2000,
+  };
+  const secondGate = {
+    id: "gate-b",
+    program: "node",
+    args: ["--version"],
+    timeoutMs: 500,
+  };
+
+  const baseWithGate = configForMode("bugfix", {
+    extraGates: [initialGate],
+  });
+  assert.deepEqual(baseWithGate.extraGates, [initialGate]);
+
+  // Override gate-a and add gate-b
+  const overridden = configForMode("bugfix", {
+    extraGates: [replacementGate, secondGate],
+  });
+  assert.deepEqual(overridden.extraGates, [replacementGate, secondGate]);
+});

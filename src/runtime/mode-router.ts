@@ -36,10 +36,17 @@ export type MissionMode = ExtendedMissionMode;
  */
 export const MODE_ALIASES: Readonly<Record<string, CanonicalMissionMode>> = {
   debug: "bugfix",
+  fix: "bugfix",
+  "bug-fix": "bugfix",
+  bug_fix: "bugfix",
   refactor: "feature",
   review: "diagnostic",
   "post-mortem": "diagnostic",
+  postmortem: "diagnostic",
+  post_mortem: "diagnostic",
   "project-management": "pm",
+  project_management: "pm",
+  projectmanagement: "pm",
 };
 
 /**
@@ -201,13 +208,13 @@ export function normalizeMode(mode: string): MissionMode {
     return "feature";
   }
   const clean = mode.trim().toLowerCase();
-  if (clean in MODE_ALIASES) {
+  if (Object.hasOwn(MODE_ALIASES, clean)) {
     return MODE_ALIASES[clean];
   }
-  if (CANONICAL_MODES.includes(clean as CanonicalMissionMode)) {
+  if ((CANONICAL_MODES as readonly string[]).includes(clean)) {
     return clean as CanonicalMissionMode;
   }
-  if (clean in EXTENDED_ROLE_TOPOLOGIES) {
+  if (Object.hasOwn(EXTENDED_ROLE_TOPOLOGIES, clean)) {
     return clean as ExtendedMissionMode;
   }
   return "feature";
@@ -222,13 +229,17 @@ export function rolesForMode(mode: MissionMode | string): VisionRole[] {
     return [...CANONICAL_ROLE_TOPOLOGIES.feature];
   }
   const clean = mode.trim().toLowerCase();
-  if (clean in EXTENDED_ROLE_TOPOLOGIES) {
+  if (Object.hasOwn(EXTENDED_ROLE_TOPOLOGIES, clean)) {
     return [...EXTENDED_ROLE_TOPOLOGIES[clean]];
   }
-  const canonical = MODE_ALIASES[clean] ?? (clean as CanonicalMissionMode);
-  const roles = CANONICAL_ROLE_TOPOLOGIES[canonical];
-  if (roles) {
-    return [...roles];
+  const targetMode = Object.hasOwn(MODE_ALIASES, clean)
+    ? MODE_ALIASES[clean]
+    : clean;
+  if (Object.hasOwn(EXTENDED_ROLE_TOPOLOGIES, targetMode)) {
+    return [...EXTENDED_ROLE_TOPOLOGIES[targetMode]];
+  }
+  if (Object.hasOwn(CANONICAL_ROLE_TOPOLOGIES, targetMode)) {
+    return [...CANONICAL_ROLE_TOPOLOGIES[targetMode as CanonicalMissionMode]];
   }
   // Safe default: full feature pipeline
   return [...CANONICAL_ROLE_TOPOLOGIES.feature];
@@ -243,10 +254,21 @@ export function configForMode(
   overrides?: Partial<ModeConfig>,
 ): ModeConfig {
   const normalized = normalizeMode(mode);
-  const base =
-    normalized in EXTENDED_MODE_CONFIGS
-      ? EXTENDED_MODE_CONFIGS[normalized]
-      : CANONICAL_MODE_CONFIGS[normalized as CanonicalMissionMode] ?? CANONICAL_MODE_CONFIGS.feature;
+  const base = Object.hasOwn(EXTENDED_MODE_CONFIGS, normalized)
+    ? EXTENDED_MODE_CONFIGS[normalized]
+    : Object.hasOwn(CANONICAL_MODE_CONFIGS, normalized)
+      ? CANONICAL_MODE_CONFIGS[normalized as CanonicalMissionMode]
+      : CANONICAL_MODE_CONFIGS.feature;
+
+  const combinedGates = new Map<string, OracleGate>();
+  for (const gate of base.extraGates ?? []) {
+    combinedGates.set(gate.id, gate);
+  }
+  if (Array.isArray(overrides?.extraGates)) {
+    for (const gate of overrides.extraGates) {
+      combinedGates.set(gate.id, gate);
+    }
+  }
 
   return {
     mode: normalized,
@@ -257,8 +279,6 @@ export function configForMode(
       ...base.rolePromptOverlays,
       ...overrides?.rolePromptOverlays,
     },
-    extraGates: overrides?.extraGates
-      ? [...overrides.extraGates]
-      : [...(base.extraGates ?? [])],
+    extraGates: Array.from(combinedGates.values()),
   };
 }
