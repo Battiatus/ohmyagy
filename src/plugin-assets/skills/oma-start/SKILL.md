@@ -42,7 +42,7 @@ When invoked (at initial launch or mid-conversation / late-init), the Conductor 
      *(Or `graph_inspect` to review existing DAG nodes and completed work items).*
 
 3. **Level 3 — Optional Secondary: Session Transcript File (Graceful Fallback)**
-   - **Mechanism**: Inspect disk for runtime transcript exports (e.g. `transcript.jsonl`, `.oma/transcript.jsonl`, or host session log paths) **if** supported by the execution runtime.
+   - **Mechanism**: Inspect disk for runtime transcript exports (e.g. `~/.gemini/antigravity/brain/<session_id>/.system_generated/logs/transcript.jsonl`, `.oma/transcript.jsonl`, or workspace `transcript.jsonl`) **if** supported by the execution runtime.
    - **Graceful Fallback**: If no transcript file is accessible or if the host runtime does not produce transcript files, **omit gracefully without error or blocking**. Level 1 (native conversational memory) and Level 2 (SQLite Brain & Ledger) provide complete context.
 
 ---
@@ -61,7 +61,7 @@ Before ANY execution, graph initialization, or file mutation, the Conductor MUST
    - **Required Mission Mode**: Confirm the operational mode (`bugfix`, `feature`, `diagnostic`, `infra`, `pm` / `review`, `refactor`).
 3. **MANDATORY BLOCKING GATE — Zero Run Before Confirmation**:
    **STRICT ENFORCEMENT: ZERO RUN / ZERO EXECUTION BEFORE EXPLICIT USER ANSWERS AND CONFIRMATION.**
-   The conductor MUST NOT call `graph_init`, MUST NOT mutate files, MUST NOT stage changes, and MUST NOT dispatch workers until the user has provided explicit answers and confirmed the proposed direction. Execution is blocked at this gate.
+   The conductor MUST NOT call `graph_init`, MUST NOT mutate files, MUST NOT stage changes, and MUST NOT dispatch workers until the user has provided explicit answers and confirmed the proposed direction. Execution is blocked at this gate. Present the summary and questions directly to the user (via interactive modal `ask_question` or explicit conversational prompt) and halt execution to await user response.
 
 ---
 
@@ -150,6 +150,7 @@ The Conductor drives execution iteratively using `converge_step`:
    - **`"succeeded"` / `"converged"`**: All DAG nodes completed, all quality gates green. Proceed to Step 6 (Memory Compaction & Completion).
    - **`"no_progress_blocked"`**: **HALT IMMEDIATELY.** Two consecutive rounds without ProgressVector improvement detected. Do not retry blindly. Halt execution and output a structured diagnosis detailing stagnated items, failed gates, and root cause.
    - **`"budget_exhausted"`**: **HALT.** Maximum round limit or timeout reached. Report status and await user direction.
+   - **`"failed"`**: **HALT.** Terminal graph failure detected with no ready or running nodes and unresolvable gate failures. Report failure diagnosis and await user direction.
    - **`"in_progress"`**: Retrieve `readyNodes` and proceed with dispatch.
 
 2. **Dispatch Ready Nodes to Canonical Roles**:
@@ -172,10 +173,49 @@ The Conductor drives execution iteratively using `converge_step`:
 
 3. **Enforce Strict 2-Phase Commit (2PC) Lifecycle for File Modifications**:
    Every file mutation MUST follow the 2PC protocol:
-   - `propose_change`: Stage changes in an isolated workspace worktree.
-   - `attest_review`: Independent `reviewer` inspects staged diff and issues verdict (`approved` or `rejected`).
-   - Test gates: Automated test execution and `modeConfig.extraGates`.
-   - `promote_change`: Fast-forward CAS commit to HEAD only upon approved review and passing gates.
+   - **Stage changes (`propose_change`)**:
+     Stage changes in an isolated workspace worktree:
+     ```json
+     {
+       "tool": "propose_change",
+       "arguments": {
+         "parentVersion": "HEAD",
+         "operations": [
+           {
+             "type": "modify",
+             "path": "<relative_path>",
+             "content": "<new_content>"
+           }
+         ]
+       }
+     }
+     ```
+   - **Independent review (`attest_review`)**:
+     Independent `reviewer` role inspects staged diff and issues attestation:
+     ```json
+     {
+       "tool": "attest_review",
+       "arguments": {
+         "transactionId": "<transactionId>",
+         "stagedDiffDigest": "<stagedDiffDigest>",
+         "reviewerRunKey": "<reviewer_run_key>",
+         "reviewerExpertId": "reviewer",
+         "verdict": "approved"
+       }
+     }
+     ```
+   - **Automated test gates**: Run test program and evaluate `modeConfig.extraGates`.
+   - **Promote changes (`promote_change`)**:
+     Fast-forward CAS commit to HEAD only upon approved review and passing gates:
+     ```json
+     {
+       "tool": "promote_change",
+       "arguments": {
+         "transactionId": "<transactionId>",
+         "stagedDiffDigest": "<stagedDiffDigest>"
+       }
+     }
+     ```
    - Never bypass 2PC with direct unverified workspace edits.
 
 4. **Mark Node Completion & Handle Failures with Dynamic Replanning**:

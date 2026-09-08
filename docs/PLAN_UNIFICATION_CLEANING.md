@@ -81,7 +81,7 @@
   - *Niveau 1 — primaire (nominal)* : contexte conversationnel **actif** de la session (le LLM voit déjà l'historique ; aucun I/O disque requis).
   - *Niveau 2 — cross-session (cold start)* : `brain_query` sur `project_id` + état du graphe rechargé depuis SQLite/ledger.
   - *Niveau 3 — optionnel* : fichier transcript de session **si** le runtime le fournit, sinon **omission gracieuse**.
-  *Fichiers* : `oma-start/SKILL.md` (3 copies). *Test* : revue (skill) + md5 égaux. *Dépend* : T0. *Note* : documenter le résultat de la vérif « transcript accessible ? ».
+  *Fichiers* : `oma-start/SKILL.md` (3 copies). *Test* : revue (skill) + md5 égaux. *Dépend* : T0. *Note* : vérifié — transcript accessible sous `~/.gemini/antigravity/brain/<session_id>/.system_generated/logs/transcript.jsonl` dans le runtime Antigravity, avec omission gracieuse si non disponible.
 - **T4.2 — Sas d'interview obligatoire, chirurgical (bloquant).** Step 2, séquence stricte :
   1. OMA **résume en 2-3 phrases** ce qu'il a décortiqué (discussion passée + état projet/DB).
   2. Il pose **2-3 questions ciblées** seulement, sur les frictions réelles : objectifs mesurables, contraintes techniques, choix d'architecture, **mode requis**.
@@ -130,7 +130,7 @@
 ## Portes d'acceptation globales
 - [ ] build 0 ; `bun test` sans **nouveau** fail (4 pré-existants inchangés).
 - [ ] Suites moteur (`dynamic-engine`, `real-mission`) inchangées & vertes (non-régression T3.3).
-- [ ] Conducteur : Late-Init + **interview bloquante** + boucle `converge_step` + `graph_replan`.
+- [x] Conducteur : Late-Init + **interview bloquante** + boucle `converge_step` + `graph_replan`.
 - [ ] Mémoire : `(context, actions)` + `node_ref` + dimensions ; runs (2 chemins) peuplent le brain ; DB compactée.
 - [ ] 6 rôles seuls exposés, modes = configs ; morts archivés.
 - [ ] `/oma:status` voit un run session ; (Phase 8 si retenue) plus aucun spawn détaché.
@@ -144,7 +144,7 @@
 5. **Transcript de session** (T4.1) : ✅ **Non bloquant** — résolution 3 niveaux (actif → SQLite → transcript optionnel).
 
 ## Reste à vérifier avant/pendant l'exécution
-- **Existence d'un transcript de session accessible** (T4.1 niveau 3) : à confirmer côté runtime Antigravity ; omission gracieuse sinon.
+- **Existence d'un transcript de session accessible** (T4.1 niveau 3) : ✅ **Vérifié et documenté** — le runtime Antigravity écrit `transcript.jsonl` sous `~/.gemini/antigravity/brain/<session_id>/.system_generated/logs/transcript.jsonl`. Omission gracieuse si indisponible.
 
 ## Références
 `docs/ANALYSE_VISION_VS_CODE.md` · `src/orchestration/{dynamic-engine,real-mission}.ts` · `src/mcp/{brain,graph}-tools.ts` · `src/mission/read-model.ts` + `src/graph/mission-projections.ts` · `src/runtime/capability-resolver.ts` · `src/brain/summarizer.ts`.
