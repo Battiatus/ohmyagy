@@ -34,9 +34,8 @@ function buildPrompt(text: string, projectName: string): string {
     "",
     "Return ONLY a single JSON object, no prose, with this exact shape:",
     "{",
-    '  "userIntent": "one sentence: what the user wanted this round",',
-    '  "actionsTaken": "one or two sentences: what was actually done",',
-    '  "outcome": "one sentence: the concrete result or state",',
+    '  "context": "one or two sentences: user intent, starting situation, and context for this round",',
+    '  "actions": "one or two sentences: what was actually done and the concrete outcome",',
     `  "memory": { "dimension": one of [${dimensions}], "title": "short title", "content": "durable fact worth keeping", "tags": ["..."] }`,
     "}",
     'Omit the "memory" field entirely unless a durable decision, error, preference or',
@@ -135,13 +134,22 @@ function coerceSummary(value: unknown): StructuredSummary | null {
     return null;
   }
   const v = value as Record<string, unknown>;
-  const userIntent = asString(v.userIntent);
-  const actionsTaken = asString(v.actionsTaken);
+  const context = asString(v.context) || asString(v.userIntent);
+  const actions = asString(v.actions) || asString(v.actionsTaken);
   const outcome = asString(v.outcome);
-  if (!userIntent && !actionsTaken && !outcome) {
+  const nodeRef = asString(v.nodeRef) || asString(v.node_ref);
+
+  if (!context && !actions && !outcome) {
     return null;
   }
-  const summary: StructuredSummary = { userIntent, actionsTaken, outcome };
+  const summary: StructuredSummary = {
+    context,
+    actions,
+    userIntent: context,
+    actionsTaken: actions,
+    outcome,
+    ...(nodeRef ? { nodeRef } : {}),
+  };
 
   const mem = v.memory;
   if (mem && typeof mem === "object") {

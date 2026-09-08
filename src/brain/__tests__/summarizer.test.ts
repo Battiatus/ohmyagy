@@ -44,9 +44,8 @@ afterEach(() => {
 });
 
 const goodReformulator: Reformulator = async () => ({
-  userIntent: "Wire the summarizer",
-  actionsTaken: "Created summarizer.ts core",
-  outcome: "Core compiles and records interactions",
+  context: "Wire the summarizer",
+  actions: "Created summarizer.ts core",
   memory: {
     dimension: "architectural_decision",
     title: "Summarizer is fail-open",
@@ -55,7 +54,7 @@ const goodReformulator: Reformulator = async () => ({
   },
 });
 
-test("records a reformulated interaction and its durable memory", async () => {
+test("records a reformulated interaction in canonical context/actions format and its durable memory", async () => {
   const result = await captureInteraction({
     brain,
     projectId,
@@ -63,6 +62,7 @@ test("records a reformulated interaction and its durable memory", async () => {
     projectName: "P",
     text: "user asked to wire the summarizer; assistant created the core module",
     reformulate: goodReformulator,
+    nodeRef: "node-summarizer-core",
   });
 
   assert.equal(result.recorded, true);
@@ -73,6 +73,8 @@ test("records a reformulated interaction and its durable memory", async () => {
   const interactions = brain.listInteractions(sessionId);
   assert.equal(interactions.length, 1);
   assert.equal(interactions[0].userIntent, "Wire the summarizer");
+  assert.equal(interactions[0].actionsTaken, "Created summarizer.ts core");
+  assert.equal(interactions[0].nodeRef, "node-summarizer-core");
   assert.equal(interactions[0].roundNumber, 0);
 
   const memories = brain.queryMemory({
@@ -82,6 +84,30 @@ test("records a reformulated interaction and its durable memory", async () => {
   assert.equal(memories.length, 1);
   assert.equal(memories[0].title, "Summarizer is fail-open");
   assert.equal(memories[0].sessionId, sessionId);
+});
+
+test("supports backward-compatible {userIntent, actionsTaken, outcome} format", async () => {
+  const result = await captureInteraction({
+    brain,
+    projectId,
+    sessionId,
+    projectName: "P",
+    text: "legacy format test",
+    reformulate: async () => ({
+      userIntent: "Legacy user intent",
+      actionsTaken: "Legacy actions",
+      outcome: "Legacy outcome",
+    }),
+  });
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.summarized, true);
+  const interactions = brain.listInteractions(sessionId);
+  assert.equal(interactions.length, 1);
+  assert.equal(interactions[0].userIntent, "Legacy user intent");
+  assert.equal(interactions[0].actionsTaken, "Legacy actions");
+  assert.equal(interactions[0].outcome, "Legacy outcome");
+  assert.equal(interactions[0].nodeRef, null);
 });
 
 test("advances the round number across successive captures", async () => {

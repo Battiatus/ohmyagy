@@ -23,6 +23,8 @@ import type { ArtifactRef, ReviewerVerdict, RunAuthority } from "./model.js";
 import { WorktreePool, type IWorktreePool } from "./worktree-pool.js";
 import { AgyDriver, type DriverExecutionResult, type IAgyDriver } from "../runtime/agy-driver.js";
 import { MissionLogger, type RunLogger } from "../logging/mission-logger.js";
+import { BrainStore } from "../brain/brain-store.js";
+import { ingestMissionIntoBrain } from "../brain/mission-ingest.js";
 
 export interface RealMissionOptions {
   workspaceRoot: string;
@@ -1297,6 +1299,30 @@ function finishMission(
     `Mission ${status.toUpperCase()} in ${durationMs}ms (waves: ${waves}, commits: ${commitShas.length}, diagnostics: ${diagnostics.length})`,
     status === "succeeded" ? "SUCCESS" : "ERROR",
   );
+
+  // Ingest completed mission into the Neural Brain (fail-open)
+  try {
+    const wsRoot = resolve(dirname(eventsPath), "../../..");
+    const brainPath = process.env.OMA_BRAIN_PATH ?? join(wsRoot, ".oma", "brain.sqlite");
+    const brain = new BrainStore(brainPath);
+    try {
+      ingestMissionIntoBrain({
+        brain,
+        missionId,
+        eventsPath,
+        workspaceRoot: wsRoot,
+      });
+    } finally {
+      brain.close();
+    }
+  } catch (brainErr) {
+    logger?.log(
+      "Mission",
+      `Failed to ingest mission into brain: ${brainErr instanceof Error ? brainErr.message : String(brainErr)}`,
+      "WARN",
+    );
+  }
+
   return {
     missionId,
     status,

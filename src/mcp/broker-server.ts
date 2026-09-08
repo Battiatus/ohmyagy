@@ -336,7 +336,8 @@ export function handleRequest(
       } else if (typeof toolName === "string" && ROUTING_TOOL_NAMES.has(toolName)) {
         result = executeRoutingTool(toolName, input);
       } else if (typeof toolName === "string" && ORCHESTRATION_TOOL_NAMES.has(toolName)) {
-        result = executeOrchestrationTool(config.workspaceRoot, toolName, input);
+        const accessor = getBrain ?? createBrainAccessor(config);
+        result = executeOrchestrationTool(config.workspaceRoot, toolName, input, accessor());
       } else {
         throw new Error(`Unknown tool: ${toolName}`);
       }

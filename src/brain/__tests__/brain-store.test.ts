@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "bun:test";
 import { BrainStore, BrainStoreError } from "../brain-store.js";
+import { openDatabase } from "../sqlite-adapter.js";
 
 let root: string;
 let store: BrainStore;
@@ -319,6 +320,161 @@ test("records and lists interaction summaries chronologically by round", () => {
   assert.equal(rounds[0].roundNumber, 1);
   assert.equal(rounds[1].roundNumber, 2);
   assert.equal(rounds[0].userIntent, "Create schema");
+});
+
+test("links interaction rounds to node_ref and filters by node", () => {
+  const project = store.ensureProject({ name: "P", rootPath: "/repos/p" });
+  const session1 = store.startSession({ projectId: project.id });
+  const session2 = store.startSession({ projectId: project.id });
+
+  const r1 = store.recordInteraction({
+    sessionId: session1.id,
+    roundNumber: 0,
+    userIntent: "Implement node A",
+    actionsTaken: "Wrote code for node A",
+    outcome: "compiled",
+    nodeRef: "node-alpha",
+  });
+  assert.equal(r1.nodeRef, "node-alpha");
+  assert.equal(r1.context, "Implement node A");
+  assert.equal(r1.actions, "Wrote code for node A");
+
+  const r2 = store.recordInteraction({
+    sessionId: session1.id,
+    roundNumber: 1,
+    userIntent: "Implement node B",
+    actionsTaken: "Wrote code for node B",
+    outcome: "compiled",
+    nodeRef: "node-beta",
+  });
+  assert.equal(r2.nodeRef, "node-beta");
+
+  const r3 = store.recordInteraction({
+    sessionId: session2.id,
+    roundNumber: 0,
+    userIntent: "Review node A in second session",
+    actionsTaken: "Verified node A",
+    outcome: "approved",
+    nodeRef: "node-alpha",
+  });
+
+  // Verify getInteraction retrieves nodeRef
+  assert.equal(store.getInteraction(r1.id)?.nodeRef, "node-alpha");
+  assert.equal(store.getInteraction(r2.id)?.nodeRef, "node-beta");
+
+  // Verify listInteractions filtering by nodeRef within a session
+  const alphaInSession1 = store.listInteractions(session1.id, "node-alpha");
+  assert.equal(alphaInSession1.length, 1);
+  assert.equal(alphaInSession1[0].id, r1.id);
+  assert.equal(alphaInSession1[0].nodeRef, "node-alpha");
+
+  const betaInSession1 = store.listInteractions(session1.id, "node-beta");
+  assert.equal(betaInSession1.length, 1);
+  assert.equal(betaInSession1[0].id, r2.id);
+
+  // Verify listInteractionsByNode returns all interactions across sessions
+  const alphaAll = store.listInteractionsByNode("node-alpha");
+  assert.equal(alphaAll.length, 2);
+  assert.deepEqual(
+    alphaAll.map((i) => i.id).sort(),
+    [r1.id, r3.id].sort(),
+  );
+
+  // Non-existent node returns empty array
+  assert.equal(store.listInteractionsByNode("ghost-node").length, 0);
+  assert.equal(store.listInteractions(session1.id, "ghost-node").length, 0);
+});
+
+test("migrates existing database lacking node_ref column additively", () => {
+  const legacyDbPath = join(root, "legacy.sqlite");
+  const rawDb = openDatabase(legacyDbPath);
+
+  // Create legacy schema without node_ref column
+  rawDb.exec(`
+    CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE, tech_stack TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, started_at INTEGER NOT NULL, last_active_at INTEGER NOT NULL, objective TEXT, status TEXT NOT NULL);
+    CREATE TABLE memory_entries (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, session_id TEXT, dimension TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, tags TEXT, confidence REAL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+    CREATE TABLE interaction_summaries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, round_number INTEGER NOT NULL, user_intent TEXT, actions_taken TEXT, outcome TEXT, created_at INTEGER NOT NULL);
+  `);
+  rawDb.prepare(`INSERT INTO projects VALUES ('p1', 'Legacy', '/repos/legacy', null, 100, 100)`).run();
+  rawDb.prepare(`INSERT INTO sessions VALUES ('s1', 'p1', 100, 100, 'Legacy test', 'active')`).run();
+  rawDb.prepare(`INSERT INTO interaction_summaries VALUES ('i1', 's1', 0, 'Legacy intent', 'Legacy action', 'ok', 100)`).run();
+  rawDb.close();
+
+  // Open with BrainStore: migration should detect missing node_ref, run ALTER TABLE and add index
+  const migratedStore = new BrainStore(legacyDbPath);
+  try {
+    const existing = migratedStore.getInteraction("i1");
+    assert.ok(existing);
+    assert.equal(existing.nodeRef, null);
+
+    // New interaction with nodeRef can be recorded into migrated store
+    const newInt = migratedStore.recordInteraction({
+      sessionId: "s1",
+      roundNumber: 1,
+      userIntent: "Migrated round",
+      nodeRef: "migrated-node-1",
+    });
+    assert.equal(newInt.nodeRef, "migrated-node-1");
+
+    const fetched = migratedStore.getInteraction(newInt.id);
+    assert.equal(fetched?.nodeRef, "migrated-node-1");
+  } finally {
+    migratedStore.close();
+  }
+});
+
+test("supports idempotent upsert with deterministic id for memory and interactions", () => {
+  const project = store.ensureProject({ name: "P", rootPath: "/repos/p" });
+  const session = store.startSession({ projectId: project.id });
+
+  // Idempotent storeMemory with explicit id
+  const memId = "deterministic-mem-1";
+  const m1 = store.storeMemory({
+    id: memId,
+    projectId: project.id,
+    sessionId: session.id,
+    dimension: "run_summary",
+    title: "Initial run",
+    content: "Run started",
+  });
+  assert.equal(m1.id, memId);
+  assert.equal(m1.content, "Run started");
+
+  const m2 = store.storeMemory({
+    id: memId,
+    projectId: project.id,
+    sessionId: session.id,
+    dimension: "run_summary",
+    title: "Updated run",
+    content: "Run completed successfully",
+  });
+  assert.equal(m2.id, memId);
+  assert.equal(m2.content, "Run completed successfully");
+  assert.equal(store.queryMemory({ projectId: project.id }).length, 1);
+
+  // Idempotent recordInteraction with explicit id
+  const intId = "deterministic-int-1";
+  const i1 = store.recordInteraction({
+    id: intId,
+    sessionId: session.id,
+    roundNumber: 0,
+    userIntent: "Step 1",
+    nodeRef: "node-1",
+  });
+  assert.equal(i1.id, intId);
+  assert.equal(i1.userIntent, "Step 1");
+
+  const i2 = store.recordInteraction({
+    id: intId,
+    sessionId: session.id,
+    roundNumber: 0,
+    userIntent: "Step 1 completed",
+    nodeRef: "node-1",
+  });
+  assert.equal(i2.id, intId);
+  assert.equal(i2.userIntent, "Step 1 completed");
+  assert.equal(store.listInteractions(session.id).length, 1);
 });
 
 test("rejects sessions on unknown projects and interactions on unknown sessions", () => {

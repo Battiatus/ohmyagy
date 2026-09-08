@@ -7,6 +7,7 @@ import { test } from "bun:test";
 import { sha256 } from "../../ledger/canonical.js";
 import type { DriverExecutionResult, DriverInvocationOptions, IAgyDriver } from "../../runtime/agy-driver.js";
 import { RealMissionExecutor } from "../real-mission.js";
+import { BrainStore } from "../../brain/brain-store.js";
 
 test("real mission promotes only a worker diff that passed review and external gate", { timeout: 60_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "oma-real-mission-"));
@@ -43,10 +44,37 @@ test("real mission promotes only a worker diff that passed review and external g
     assert.match(events, /"integration_attempted"/);
     assert.equal(readFileSync(join(root, ".omc", "state", "session.json"), "utf8"), "{}\n");
     assert.equal(readFileSync(join(root, ".omo", "run-continuation", "session.json"), "utf8"), "{}\n");
+
+    // T5.4: Verify mission was ingested into Brain and memories linked to node_ref exist
+    const brainStore = new BrainStore(join(root, ".oma", "brain.sqlite"));
+    try {
+      const projects = brainStore.listProjects();
+      assert.equal(projects.length, 1);
+      const memories = brainStore.queryMemory({ projectId: projects[0].id, query: "work-change-value" });
+      assert.ok(memories.length >= 1, "Expected memories linked to work-change-value node");
+      assert.ok(memories.some((m) => m.tags.includes("work-change-value") || m.tags.includes("node:work-change-value")));
+    } finally {
+      brainStore.close();
+    }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTree(root);
   }
 });
+
+function removeTree(dir: string): void {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
+        throw err;
+      }
+      Bun.sleepSync(50);
+    }
+  }
+}
 
 class DeterministicDriver implements IAgyDriver {
   public async invoke(options: DriverInvocationOptions): Promise<DriverExecutionResult> {

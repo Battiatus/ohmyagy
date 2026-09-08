@@ -14,6 +14,8 @@ import {
   type DynamicWorkflowLimits,
 } from "../orchestration/convergence-step.js";
 import type { ProgressVector } from "../oracle/objective-judge.js";
+import { BrainStore } from "../brain/brain-store.js";
+import { ingestMissionIntoBrain } from "../brain/mission-ingest.js";
 
 /**
  * MCP tool surface for Unified Session-Native Orchestration & Dynamic Convergence.
@@ -157,10 +159,11 @@ export function executeOrchestrationTool(
   workspaceRoot: string,
   toolName: string,
   input: unknown,
+  injectedBrain?: BrainStore,
 ): Record<string, unknown> {
   switch (toolName) {
     case "converge_step":
-      return executeConvergeStep(workspaceRoot, input);
+      return executeConvergeStep(workspaceRoot, input, injectedBrain);
     case "converge_status":
       return executeConvergeStatus(workspaceRoot, input);
     case "graph_replan":
@@ -193,6 +196,7 @@ function readProgressHistoryFromEvents(workspaceRoot: string, missionId: string)
 export function executeConvergeStep(
   workspaceRoot: string,
   input: unknown,
+  injectedBrain?: BrainStore,
 ): Record<string, unknown> {
   const missionId = resolveMissionId(workspaceRoot, input);
   const paths = graphPaths(workspaceRoot);
@@ -251,6 +255,30 @@ export function executeConvergeStep(
     currentRound,
     isIntegrated,
   });
+
+  // Ingest convergence step and graph state into the Brain (fail-open)
+  try {
+    const shouldClose = !injectedBrain;
+    const brain =
+      injectedBrain ??
+      new BrainStore(process.env.OMA_BRAIN_PATH ?? join(workspaceRoot, ".oma", "brain.sqlite"));
+    try {
+      ingestMissionIntoBrain({
+        brain,
+        missionId,
+        workspaceRoot,
+        graph: runtime.graph,
+        graphEvents,
+        roundNumber: currentRound,
+      });
+    } finally {
+      if (shouldClose) {
+        brain.close();
+      }
+    }
+  } catch {
+    // Fail-open: Orchestration convergence step must never fail due to brain ingestion
+  }
 
   return {
     status: stepResult.status,

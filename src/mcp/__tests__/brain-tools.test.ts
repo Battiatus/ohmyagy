@@ -184,3 +184,20 @@ test("brain tools reject an explicit unknown project id", () => {
   assert.equal(structured.status, "rejected");
   assert.match(String(structured.reason), /ghost-project/);
 });
+
+test("brain_summarize records canonical context, actions, and nodeRef", () => {
+  const res = callTool("brain_summarize", {
+    context: "Canonical round context: fix authentication bug",
+    actions: "Applied patch to auth handler and re-ran tests",
+    outcome: "all passed",
+    nodeRef: "task-auth-fix",
+  });
+  assert.equal(res.isError, false);
+  assert.equal(res.structured.status, "summarized");
+  const interaction = res.structured.interaction as Record<string, unknown>;
+  assert.equal(interaction.userIntent, "Canonical round context: fix authentication bug");
+  assert.equal(interaction.actionsTaken, "Applied patch to auth handler and re-ran tests");
+  assert.equal(interaction.nodeRef, "task-auth-fix");
+  assert.equal(interaction.context, "Canonical round context: fix authentication bug");
+  assert.equal(interaction.actions, "Applied patch to auth handler and re-ran tests");
+});

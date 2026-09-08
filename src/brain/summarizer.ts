@@ -20,9 +20,17 @@ import { MEMORY_DIMENSIONS } from "./types.js";
 
 /** Structured summary produced by the Flash mini-agent. */
 export interface StructuredSummary {
-  userIntent: string;
-  actionsTaken: string;
-  outcome: string;
+  /** Canonical context: user intent, situation, and starting state this round. */
+  context?: string;
+  /** Canonical actions: what was done and the concrete outcome. */
+  actions?: string;
+  /** Backward-compatible alias for context. */
+  userIntent?: string;
+  /** Backward-compatible alias for actions. */
+  actionsTaken?: string;
+  outcome?: string;
+  /** Optional node reference this exchange pertains to. */
+  nodeRef?: string;
   /** Optional durable memory worth keeping beyond the interaction log. */
   memory?: {
     dimension: MemoryDimension;
@@ -64,8 +72,9 @@ export async function captureInteraction(params: {
   projectName: string;
   text: string;
   reformulate: Reformulator;
+  nodeRef?: string;
 }): Promise<SummarizerResult> {
-  const { brain, projectId, sessionId, projectName, text, reformulate } = params;
+  const { brain, projectId, sessionId, projectName, text, reformulate, nodeRef } = params;
 
   const trimmed = text.trim();
   if (trimmed.length === 0) {
@@ -91,6 +100,7 @@ export async function captureInteraction(params: {
         userIntent: null,
         actionsTaken: null,
         outcome: truncate(trimmed, MAX_RAW_OUTCOME),
+        nodeRef: nodeRef ?? null,
       });
       return {
         recorded: true,
@@ -100,12 +110,17 @@ export async function captureInteraction(params: {
       };
     }
 
+    const resolvedContext = summary.context || summary.userIntent || null;
+    const resolvedActions = summary.actions || summary.actionsTaken || null;
+    const resolvedNodeRef = nodeRef ?? summary.nodeRef ?? null;
+
     const interaction = brain.recordInteraction({
       sessionId,
       roundNumber,
-      userIntent: summary.userIntent || null,
-      actionsTaken: summary.actionsTaken || null,
+      userIntent: resolvedContext,
+      actionsTaken: resolvedActions,
       outcome: summary.outcome || null,
+      nodeRef: resolvedNodeRef,
     });
 
     let memoryId: string | undefined;

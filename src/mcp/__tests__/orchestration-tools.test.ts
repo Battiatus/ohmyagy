@@ -332,4 +332,42 @@ describe("Orchestration MCP Tools (Phase 3: T3.4 - T3.7)", () => {
     assert.equal(stepRes.structured.status, "in_progress");
     assert.equal(stepRes.structured.consecutiveNoProgressRounds, 1);
   });
+
+  it("T5.4: converge_step ingests graph state into Brain, and brain_query returns memories linked to node_ref", () => {
+    const node1 = makeAgentNode("task-node-auth", "Authentication Node");
+    callTool("graph_init", {
+      missionId: "test-mission",
+      nodes: [node1],
+      edges: [],
+    });
+
+    // Mark node as succeeded
+    callTool("graph_mark_node", {
+      nodeId: "task-node-auth",
+      state: "succeeded",
+      dispatchId: "disp-auth-1",
+    });
+
+    // Run converge_step which evaluates and ingests into brain
+    const stepRes = callTool("converge_step", {
+      isIntegrated: true,
+    });
+    assert.equal(stepRes.isError, false);
+
+    // Query brain using brain_query for the specific node_ref
+    const queryRes = callTool("brain_query", {
+      query: "task-node-auth",
+    });
+    assert.equal(queryRes.isError, false);
+    const entries = queryRes.structured.entries as Array<{
+      title: string;
+      content: string;
+      tags: string[];
+      dimension: string;
+    }>;
+
+    assert.ok(entries.length >= 1, "Expected memory entries linked to task-node-auth");
+    assert.ok(entries.some((e) => e.tags.includes("task-node-auth") || e.tags.includes("node:task-node-auth")));
+    assert.ok(entries.some((e) => e.title.includes("task-node-auth")));
+  });
 });

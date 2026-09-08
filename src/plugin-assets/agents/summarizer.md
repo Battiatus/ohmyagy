@@ -15,9 +15,8 @@ Return ONLY this JSON object (no prose, no code fences):
 
 ```json
 {
-  "userIntent": "one sentence — what the user wanted this round",
-  "actionsTaken": "one or two sentences — what was actually done",
-  "outcome": "one sentence — the concrete result or state",
+  "context": "one or two sentences — what the user wanted this round, situation, and starting context",
+  "actions": "one or two sentences — what was actually done and the concrete outcome",
   "memory": {
     "dimension": "architectural_decision | past_error | run_summary | project_context | user_preference",
     "title": "short title",

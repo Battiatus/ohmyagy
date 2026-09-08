@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS interaction_summaries (
     user_intent TEXT,
     actions_taken TEXT,
     outcome TEXT,
+    node_ref TEXT,
     created_at INTEGER NOT NULL
 );
 
@@ -129,6 +130,7 @@ interface InteractionRow {
   user_intent: string | null;
   actions_taken: string | null;
   outcome: string | null;
+  node_ref: string | null;
   created_at: number;
 }
 
@@ -150,6 +152,20 @@ export class BrainStore {
     }
     this.db = openDatabase(dbPath);
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  private migrate(): void {
+    const columns = this.db
+      .prepare("PRAGMA table_info(interaction_summaries)")
+      .all<{ name: string }>();
+    const hasNodeRef = columns.some((c) => c.name === "node_ref");
+    if (!hasNodeRef && columns.length > 0) {
+      this.db.exec("ALTER TABLE interaction_summaries ADD COLUMN node_ref TEXT;");
+    }
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_interactions_node_ref ON interaction_summaries(node_ref);",
+    );
   }
 
   close(): void {
@@ -306,8 +322,21 @@ export class BrainStore {
     }
     const title = requireNonEmpty(input.title, "title");
     const now = Date.now();
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
     const confidence = normaliseConfidence(input.confidence);
+
+    if (input.id) {
+      const existing = this.getMemory(input.id);
+      if (existing) {
+        return this.updateMemory(existing.id, {
+          title,
+          content: input.content,
+          tags: input.tags,
+          confidence,
+        });
+      }
+    }
+
     this.db
       .prepare(
         `INSERT INTO memory_entries
@@ -390,8 +419,8 @@ export class BrainStore {
 
     if (input.query && input.query.trim().length > 0) {
       const like = `%${escapeLike(input.query.trim())}%`;
-      clauses.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
-      params.push(like, like);
+      clauses.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')");
+      params.push(like, like, like);
     }
 
     const limit = clampLimit(input.limit);
@@ -425,20 +454,39 @@ export class BrainStore {
       );
     }
     const now = Date.now();
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
+    const userIntent = input.context ?? input.userIntent ?? null;
+    const actionsTaken = input.actions ?? input.actionsTaken ?? null;
+    const nodeRef = input.nodeRef ?? null;
+
+    if (input.id) {
+      const existing = this.getInteraction(input.id);
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE interaction_summaries
+             SET round_number = ?, user_intent = ?, actions_taken = ?, outcome = ?, node_ref = ?
+             WHERE id = ?`,
+          )
+          .run(input.roundNumber, userIntent, actionsTaken, input.outcome ?? null, nodeRef, existing.id);
+        return this.getInteraction(existing.id)!;
+      }
+    }
+
     this.db
       .prepare(
         `INSERT INTO interaction_summaries
-         (id, session_id, round_number, user_intent, actions_taken, outcome, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (id, session_id, round_number, user_intent, actions_taken, outcome, node_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         sessionId,
         input.roundNumber,
-        input.userIntent ?? null,
-        input.actionsTaken ?? null,
+        userIntent,
+        actionsTaken,
         input.outcome ?? null,
+        nodeRef,
         now,
       );
     return this.getInteraction(id)!;
@@ -453,13 +501,31 @@ export class BrainStore {
     return row ? toInteractionSummary(row) : undefined;
   }
 
-  /** Chronological list of interaction summaries for a session. */
-  listInteractions(sessionId: string): InteractionSummary[] {
+  /** Chronological list of interaction summaries for a session, optionally filtered by node_ref. */
+  listInteractions(sessionId: string, nodeRef?: string): InteractionSummary[] {
+    if (nodeRef !== undefined) {
+      return this.db
+        .prepare(
+          "SELECT * FROM interaction_summaries WHERE session_id = ? AND node_ref = ? ORDER BY round_number ASC, created_at ASC",
+        )
+        .all<InteractionRow>(sessionId, nodeRef)
+        .map(toInteractionSummary);
+    }
     return this.db
       .prepare(
         "SELECT * FROM interaction_summaries WHERE session_id = ? ORDER BY round_number ASC, created_at ASC",
       )
       .all<InteractionRow>(sessionId)
+      .map(toInteractionSummary);
+  }
+
+  /** List of interaction summaries across all sessions associated with a specific node_ref. */
+  listInteractionsByNode(nodeRef: string): InteractionSummary[] {
+    return this.db
+      .prepare(
+        "SELECT * FROM interaction_summaries WHERE node_ref = ? ORDER BY round_number ASC, created_at ASC",
+      )
+      .all<InteractionRow>(nodeRef)
       .map(toInteractionSummary);
   }
 }
@@ -510,9 +576,12 @@ function toInteractionSummary(row: InteractionRow): InteractionSummary {
     id: row.id,
     sessionId: row.session_id,
     roundNumber: Number(row.round_number),
+    context: row.user_intent,
+    actions: row.actions_taken,
     userIntent: row.user_intent,
     actionsTaken: row.actions_taken,
     outcome: row.outcome,
+    nodeRef: row.node_ref ?? null,
     createdAt: Number(row.created_at),
   };
 }

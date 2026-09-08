@@ -91,9 +91,18 @@ export const BRAIN_TOOL_DEFINITIONS = [
           description: "Objective used when auto-starting a session.",
         },
         roundNumber: { type: "number", minimum: 0 },
+        context: {
+          type: "string",
+          description: "Canonical context: user intent, starting situation, and context for this round.",
+        },
+        actions: {
+          type: "string",
+          description: "Canonical actions: what was actually done and the concrete outcome.",
+        },
         userIntent: { type: "string" },
         actionsTaken: { type: "string" },
         outcome: { type: "string" },
+        nodeRef: { type: "string" },
         title: { type: "string" },
         content: {
           type: "string",
@@ -231,10 +240,13 @@ function executeSummarize(
   const interaction = brain.recordInteraction({
     sessionId,
     roundNumber,
+    context: typeof input.context === "string" ? input.context : undefined,
+    actions: typeof input.actions === "string" ? input.actions : undefined,
     userIntent: typeof input.userIntent === "string" ? input.userIntent : undefined,
     actionsTaken:
       typeof input.actionsTaken === "string" ? input.actionsTaken : undefined,
     outcome: typeof input.outcome === "string" ? input.outcome : undefined,
+    nodeRef: typeof input.nodeRef === "string" ? input.nodeRef : undefined,
   });
 
   let memoryId: string | undefined;

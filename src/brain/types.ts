@@ -71,9 +71,14 @@ export interface InteractionSummary {
   id: string;
   sessionId: string;
   roundNumber: number;
+  /** Canonical context: user intent, situation, and starting state this round. */
+  context?: string | null;
+  /** Canonical actions: what was done and the concrete outcome. */
+  actions?: string | null;
   userIntent: string | null;
   actionsTaken: string | null;
   outcome: string | null;
+  nodeRef: string | null;
   createdAt: number;
 }
 
@@ -108,6 +113,8 @@ export interface StoreMemoryInput {
   content: string;
   tags?: string[];
   confidence?: number;
+  /** Optional explicit id for deterministic idempotency. */
+  id?: string;
 }
 
 export interface UpdateMemoryInput {
@@ -129,6 +136,11 @@ export interface RecordInteractionInput {
   sessionId: string;
   roundNumber: number;
   userIntent?: string | null;
+  context?: string | null;
   actionsTaken?: string | null;
+  actions?: string | null;
   outcome?: string | null;
+  nodeRef?: string | null;
+  /** Optional explicit id for deterministic idempotency. */
+  id?: string;
 }
