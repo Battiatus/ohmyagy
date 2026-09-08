@@ -262,6 +262,17 @@ export function installWorkspacePlugin(
 function deployCoreAgents(stagingDir: string): void {
   const agents = [
     {
+      name: "orchestrator",
+      content: [
+        "---",
+        "name: orchestrator",
+        "description: OMA Orchestrator for mission lifecycle coordination, dynamic convergence, and interview mediation",
+        "---",
+        "# OMA Orchestrator",
+        "Guides the multi-agent mission lifecycle, coordinates dynamic convergence steps, and mediates user interview gates.",
+      ].join("\n"),
+    },
+    {
       name: "planner",
       content: [
         "---",
@@ -274,11 +285,35 @@ function deployCoreAgents(stagingDir: string): void {
       ].join("\n"),
     },
     {
+      name: "explorer",
+      content: [
+        "---",
+        "name: explorer",
+        "description: OMA Explorer for codebase mapping, dependency tracing, and context discovery",
+        "---",
+        "# OMA Explorer",
+        "Inspects repositories, traces dependency graphs, and locates code symbols without mutating files.",
+        "Read-only factual analyst.",
+      ].join("\n"),
+    },
+    {
+      name: "executor",
+      content: [
+        "---",
+        "name: executor",
+        "description: OMA Executor for implementation and targeted code modifications",
+        "---",
+        "# OMA Executor",
+        "Implements scoped code modifications within isolated worktrees.",
+        "Produces clean diffs and tests before review handoff.",
+      ].join("\n"),
+    },
+    {
       name: "worker",
       content: [
         "---",
         "name: worker",
-        "description: OMA Worker for implementation and targeted execution",
+        "description: OMA Worker for implementation and targeted execution (alias for executor)",
         "---",
         "# OMA Worker",
         "Implements scoped code modifications within isolated worktrees.",
@@ -295,6 +330,17 @@ function deployCoreAgents(stagingDir: string): void {
         "# OMA Reviewer",
         "Performs independent adversarial audits on staged diffs and evidence.",
         "Evaluates correctness, edge cases and security. Read-only.",
+      ].join("\n"),
+    },
+    {
+      name: "verifier",
+      content: [
+        "---",
+        "name: verifier",
+        "description: OMA Verifier for automated gate execution and test verification",
+        "---",
+        "# OMA Verifier",
+        "Executes deterministic verification gates on staged worktrees and generates test proofs. Read-only.",
       ].join("\n"),
     },
     {
