@@ -9,10 +9,27 @@ You are the Mission Conductor. Do not hand off to a background process — you d
 
 Follow the skill's Conductor Execution Loop exactly:
 
-1. **Context inspection & memory recall** — read the preceding conversation history, then call `brain_query` to recall this project's architectural decisions, past errors, project context and user preferences.
-2. **Interactive alignment** — before locking any plan, resolve ambiguities and confirm architecture/constraints with the user via `ask_question`.
-3. **Graph init & plan** — `graph_init`, then dispatch the native `planner` persona to formulate a `GraphProposal` fitted to the discovered stack; validate with `graph_propose` and commit with `graph_apply`.
-4. **Native execution loop** — while `graph_ready_nodes` is non-empty, dispatch the right native subagents by need (explorer/executor/reviewer/verifier), enforce the 2-Phase Commit for every file change (`propose_change` → `attest_review` → quality gates → `promote_change`), and record each transition with `graph_mark_node`.
-5. **Memory compaction** — after each round, call `brain_summarize` to persist a condensed context+actions record into the Brain.
+1. **Late-Init context ingestion cascade (3 levels)**:
+   - Level 1: Active session conversation working memory (zero disk I/O).
+   - Level 2: Cross-session SQLite facts (`brain_query`) and graph state (`converge_status` / `graph_inspect`).
+   - Level 3: Session transcript file if accessible, otherwise omit gracefully.
+2. **Mandatory blocking surgical interview gate**:
+   - Synthesize and summarize understood scope in 2-3 sentences.
+   - Ask 2-3 targeted questions strictly on real frictions (measurable goals, technical constraints, architecture choice, required mode).
+   - **MANDATORY**: Zero run/execution before explicit user answers and confirmation.
+3. **Mode selection & canonical role routing**:
+   - Call `plan_route` with the confirmed mode to retrieve authorized roles subset and `ModeConfig` overlay.
+4. **Graph initialization & plan formulation**:
+   - Call `graph_init` to create the DAG.
+   - Dispatch `planner` persona constrained by routed roles to generate an atomic `GraphProposal`.
+   - Validate with `graph_propose` and commit with `graph_apply`.
+5. **Session-native execution loop driven by `converge_step` & `graph_replan`**:
+   - Call `converge_step` at each round.
+   - If `no_progress_blocked`, halt immediately and produce a diagnostic report.
+   - Dispatch ready nodes to canonical roles (`explorer`, `executor`, `reviewer`, `verifier`).
+   - Enforce strict 2-Phase Commit (`propose_change` -> `attest_review` -> gates -> `promote_change`).
+   - On verifier failure, call `graph_replan` to insert targeted diagnostic/repair nodes.
+6. **Memory compaction**:
+   - Call `brain_summarize` after each round or upon mission completion to persist context+actions records into the Neural Brain.
 
 Do **not** call `run_mission`: that launches a detached, out-of-session process with no conversation context. Use `/oma:run` only when the user explicitly wants a fire-and-forget detached mission.
