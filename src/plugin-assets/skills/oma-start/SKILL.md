@@ -7,7 +7,7 @@ description: Start a verified OMA mission from a natural-language objective
 
 `oma-start` is the primary entrypoint to execute an Oh My AntiGravity (OMA) mission directly within the active interactive session.
 
-When invoked with an objective, you serve as the **Mission Conductor**. You drive the complete lifecycle iteratively using the MCP tools exposed by the `oma-broker` MCP server and project-scoped persistent memory in the Neural Brain (`brain_*`), delegating bounded subtasks to native personas (`planner`, `sisyphus`, `metis`, `themis`).
+When invoked with an objective, you serve as the **Mission Conductor**. You drive the complete lifecycle iteratively using the MCP tools exposed by the `oma-broker` MCP server and project-scoped persistent memory in the Neural Brain (`brain_*`), delegating bounded subtasks to native specialist roles (`planner`, `explorer`, `executor`, `reviewer`, `verifier`).
 
 ---
 
@@ -89,9 +89,10 @@ Loop continuously while executable nodes remain:
      }
      ```
    - Dispatch the appropriate specialist subagent:
-     - Implementation: `sisyphus` (worker) within its declared `scope`.
-     - Code review: `metis` (adversarial reviewer) evaluating standards and correctness.
-     - Quality verification: `themis` (quality oracle) verifying test gates.
+     - Exploration / Context: `explorer` for codebase mapping and fact-finding.
+     - Implementation: `executor` (or worker) within its declared `scope`.
+     - Code review: `reviewer` (adversarial reviewer) evaluating standards and correctness.
+     - Quality verification: `verifier` (quality oracle) verifying test gates.
 
 3. **Enforce 2-Phase Commit (2PC) Lifecycle for File Modifications**:
    Every code change must adhere to the strict 2PC sequence:
