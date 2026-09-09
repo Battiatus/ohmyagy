@@ -32,6 +32,7 @@ import {
   loadGraphRuntime,
   verifyGraphStore,
   graphPaths,
+  type LoadedGraphRuntime,
 } from "../graph/store.js";
 import { projectGraph } from "../graph/kernel.js";
 import type { GraphProposal } from "../graph/proposal.js";
@@ -164,7 +165,7 @@ export class DynamicConvergenceEngine {
 
     // Initialize graph store runtime
     const gPaths = graphPaths(workspaceRoot);
-    let graphRuntime: any;
+    let graphRuntime: LoadedGraphRuntime | undefined;
     if (!existsSync(gPaths.definition)) {
       mkdirSync(gPaths.graphDir, { recursive: true });
       const initialGraph = {
@@ -386,14 +387,16 @@ export class DynamicConvergenceEngine {
         });
 
         // Register node into Graph DAG
-        try {
-          appendGraphTransition(graphRuntime, {
-            eventType: "node_dispatched",
-            nodeId: workItemId,
-            dispatchId: `disp-${workItemId}`,
-            authorityId: "oma-dynamic-engine",
-          });
-        } catch {}
+        if (graphRuntime) {
+          try {
+            appendGraphTransition(graphRuntime, {
+              eventType: "node_dispatched",
+              nodeId: workItemId,
+              dispatchId: `disp-${workItemId}`,
+              authorityId: "oma-dynamic-engine",
+            });
+          } catch {}
+        }
       }
 
       // 2. Execute Parallel Workers in Isolated Worktrees
@@ -435,8 +438,11 @@ export class DynamicConvergenceEngine {
         if (driverResult.status === "success") {
           if (mat.rawDiffContent) {
             diffContent = mat.rawDiffContent;
-          } else if (typeof (driverResult.parsedOutput as any)?.diffContent === "string") {
-            diffContent = (driverResult.parsedOutput as any).diffContent;
+          } else if (
+            isRecord(driverResult.parsedOutput) &&
+            typeof driverResult.parsedOutput.diffContent === "string"
+          ) {
+            diffContent = driverResult.parsedOutput.diffContent;
           } else {
             // Extract real Git diff from worktree
             try {
@@ -682,7 +688,7 @@ export class DynamicConvergenceEngine {
           nodes: [],
           edges: [],
         },
-        events: graphRuntime?.events ?? [],
+        events: graphRuntime ? verifyGraphStore(graphRuntime).events : [],
         progressHistory,
         limits,
         currentProgress,
@@ -845,35 +851,43 @@ export class DynamicConvergenceEngine {
     fallbackGoal: string,
   ): Array<{ scopeId: string; title: string; filesModified: string[] }> {
     if (Array.isArray(parsed)) {
-      return parsed.map((item, idx) => ({
-        scopeId: typeof item?.scopeId === "string" ? item.scopeId : `task-${idx + 1}`,
-        title: typeof item?.title === "string" ? item.title : `Task ${idx + 1}`,
-        filesModified: Array.isArray(item?.filesModified) ? item.filesModified : ["src/index.ts"],
-      }));
+      return parsed.map((raw, idx) => {
+        const item = isRecord(raw) ? raw : undefined;
+        return {
+          scopeId: typeof item?.scopeId === "string" ? item.scopeId : `task-${idx + 1}`,
+          title: typeof item?.title === "string" ? item.title : `Task ${idx + 1}`,
+          filesModified: Array.isArray(item?.filesModified) ? (item.filesModified as string[]) : ["src/index.ts"],
+        };
+      });
     }
 
-    if (parsed && typeof parsed === "object") {
-      const rec = parsed as Record<string, unknown>;
-      if (Array.isArray(rec.workItems)) {
-        return rec.workItems.map((item: any, idx: number) => ({
-          scopeId: typeof item?.scopeId === "string" ? item.scopeId : `task-${idx + 1}`,
-          title: typeof item?.title === "string" ? item.title : `Task ${idx + 1}`,
-          filesModified: Array.isArray(item?.filesModified) ? item.filesModified : ["src/index.ts"],
-        }));
+    if (isRecord(parsed)) {
+      if (Array.isArray(parsed.workItems)) {
+        return parsed.workItems.map((raw, idx) => {
+          const item = isRecord(raw) ? raw : undefined;
+          return {
+            scopeId: typeof item?.scopeId === "string" ? item.scopeId : `task-${idx + 1}`,
+            title: typeof item?.title === "string" ? item.title : `Task ${idx + 1}`,
+            filesModified: Array.isArray(item?.filesModified) ? (item.filesModified as string[]) : ["src/index.ts"],
+          };
+        });
       }
-      if (Array.isArray(rec.tasks)) {
-        return rec.tasks.map((item: any, idx: number) => ({
-          scopeId: typeof item?.scopeId === "string" ? item.scopeId : `task-${idx + 1}`,
-          title: typeof item?.title === "string" ? item.title : `Task ${idx + 1}`,
-          filesModified: Array.isArray(item?.filesModified) ? item.filesModified : ["src/index.ts"],
-        }));
+      if (Array.isArray(parsed.tasks)) {
+        return parsed.tasks.map((raw, idx) => {
+          const item = isRecord(raw) ? raw : undefined;
+          return {
+            scopeId: typeof item?.scopeId === "string" ? item.scopeId : `task-${idx + 1}`,
+            title: typeof item?.title === "string" ? item.title : `Task ${idx + 1}`,
+            filesModified: Array.isArray(item?.filesModified) ? (item.filesModified as string[]) : ["src/index.ts"],
+          };
+        });
       }
-      if (typeof rec.scopeId === "string" || typeof rec.title === "string" || typeof rec.summary === "string") {
+      if (typeof parsed.scopeId === "string" || typeof parsed.title === "string" || typeof parsed.summary === "string") {
         return [
           {
-            scopeId: typeof rec.scopeId === "string" ? rec.scopeId : "task-1",
-            title: typeof rec.title === "string" ? rec.title : (typeof rec.summary === "string" ? String(rec.summary) : fallbackGoal),
-            filesModified: Array.isArray(rec.filesModified) ? rec.filesModified : ["src/index.ts"],
+            scopeId: typeof parsed.scopeId === "string" ? parsed.scopeId : "task-1",
+            title: typeof parsed.title === "string" ? parsed.title : (typeof parsed.summary === "string" ? String(parsed.summary) : fallbackGoal),
+            filesModified: Array.isArray(parsed.filesModified) ? (parsed.filesModified as string[]) : ["src/index.ts"],
           },
         ];
       }

@@ -44,27 +44,27 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
     }
   });
 
-  it("Gate 1.2: Capability Resolver resolves planner, worker, reviewer into concrete specs", () => {
+  it("Gate 1.2: Capability Resolver resolves planner, executor, reviewer into concrete specs", () => {
     const plannerCap = CapabilityResolver.resolve("planner");
     assert.equal(plannerCap.agentName, "planner");
-    assert.equal(plannerCap.modelSlug, "agy-default");
+    assert.equal(plannerCap.modelSlug, "gemini-3.7-pro");
     assert.equal(plannerCap.effort, "high");
     assert.equal(plannerCap.sandbox, "read-only");
     assert.equal(plannerCap.readOnly, true);
     assert.ok(!plannerCap.allowedTools.includes("write_to_file"));
 
-    const workerCap = CapabilityResolver.resolve("worker");
-    assert.equal(workerCap.agentName, "worker");
-    assert.equal(workerCap.modelSlug, "agy-default");
-    assert.equal(workerCap.effort, "medium");
-    assert.equal(workerCap.sandbox, "workspace-write");
-    assert.equal(workerCap.readOnly, false);
-    assert.ok(workerCap.allowedTools.includes("write_to_file"));
-    assert.ok(workerCap.allowedTools.includes("replace_file_content"));
+    const executorCap = CapabilityResolver.resolve("executor");
+    assert.equal(executorCap.agentName, "executor");
+    assert.equal(executorCap.modelSlug, "gemini-3.7-flash");
+    assert.equal(executorCap.effort, "medium");
+    assert.equal(executorCap.sandbox, "workspace-write");
+    assert.equal(executorCap.readOnly, false);
+    assert.ok(executorCap.allowedTools.includes("write_to_file"));
+    assert.ok(executorCap.allowedTools.includes("replace_file_content"));
 
     const reviewerCap = CapabilityResolver.resolve("reviewer");
     assert.equal(reviewerCap.agentName, "reviewer");
-    assert.equal(reviewerCap.modelSlug, "agy-default");
+    assert.equal(reviewerCap.modelSlug, "gemini-3.7-pro");
     assert.equal(reviewerCap.effort, "high");
     assert.equal(reviewerCap.readOnly, true);
   });

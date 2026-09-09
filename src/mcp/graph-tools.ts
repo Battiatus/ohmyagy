@@ -19,7 +19,7 @@ import {
   type GraphEvent,
   type GraphNode,
 } from "../graph/model.js";
-import { MissionEventsStore } from "../ledger/mission-events.js";
+import { MissionEventsStore, type WorkItemDiscoveredPayload } from "../ledger/mission-events.js";
 import { eventsPathFor, findActiveMissionId, ensureMissionStarted } from "../mission/read-model.js";
 
 /**
@@ -220,6 +220,21 @@ function resolveSessionMissionId(workspaceRoot: string, input: Record<string, un
 }
 
 
+type RoleRequired = WorkItemDiscoveredPayload["roleRequired"];
+
+function isRoleRequired(role: unknown): role is RoleRequired {
+  return (
+    typeof role === "string" &&
+    (role === "planner" ||
+      role === "explorer" ||
+      role === "executor" ||
+      role === "worker" ||
+      role === "reviewer" ||
+      role === "fixer" ||
+      role === "verifier")
+  );
+}
+
 function ensureWorkItemDiscovered(
   eventsPath: string,
   missionId: string,
@@ -229,16 +244,18 @@ function ensureWorkItemDiscovered(
   try {
     const existing = MissionEventsStore.readEvents(eventsPath);
     const discovered = existing.some(
-      (e) => e.type === "work_item_discovered" && (e as any).workItemId === node.id,
+      (e) => e.type === "work_item_discovered" && e.workItemId === node.id,
     );
     if (!discovered) {
+      const persona = node.executor?.persona;
+      const roleRequired: RoleRequired = isRoleRequired(persona) ? persona : "executor";
       MissionEventsStore.appendEvent(eventsPath, missionId, {
         type: "work_item_discovered",
         workItemId: node.id,
         title: node.title,
         scope: node.scope ?? [],
         dependsOn: edges.filter((e) => e.to === node.id).map((e) => e.from),
-        roleRequired: (node.executor?.persona as any) ?? "executor",
+        roleRequired,
         acceptanceCriteria: (node.acceptance ?? []).map((a) => a.description),
       });
     }

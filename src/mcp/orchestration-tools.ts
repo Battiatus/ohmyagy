@@ -185,9 +185,13 @@ function readProgressHistoryFromEvents(workspaceRoot: string, missionId: string)
   if (!existsSync(eventsPath)) return [];
   try {
     const events = MissionEventsStore.readEvents(eventsPath);
-    return events
-      .filter((e) => e.type === "gate_evaluated" && (e as any).progressVector)
-      .map((e) => (e as any).progressVector as ProgressVector);
+    const progressVectors: ProgressVector[] = [];
+    for (const e of events) {
+      if (e.type === "gate_evaluated" && e.progressVector) {
+        progressVectors.push(e.progressVector);
+      }
+    }
+    return progressVectors;
   } catch {
     return [];
   }
@@ -262,7 +266,7 @@ export function executeConvergeStep(
   try {
     const existingEvents = MissionEventsStore.readEvents(eventsPath);
     const roundAlreadyStarted = existingEvents.some(
-      (e) => e.type === "round_started" && (e as any).roundIndex === effectiveRound,
+      (e) => e.type === "round_started" && e.roundIndex === effectiveRound,
     );
     if (!roundAlreadyStarted) {
       MissionEventsStore.appendEvent(eventsPath, missionId, {
