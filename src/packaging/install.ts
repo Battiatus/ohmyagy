@@ -186,6 +186,9 @@ export function installWorkspacePlugin(
       }
     }
 
+    if (existsSync(pluginDir)) {
+      rmSync(pluginDir, { recursive: true, force: true });
+    }
     mkdirSync(pluginDir, { recursive: true });
     cpSync(stagingDir, pluginDir, { recursive: true, force: true });
 
@@ -198,6 +201,33 @@ export function installWorkspacePlugin(
       if (item.endsWith(".md")) {
         try {
           rmSync(join(nativeAgentsDir, item), { force: true });
+        } catch {}
+      }
+    }
+
+    // Clean up legacy archived agent directories
+    const LEGACY_ARCHIVED_AGENTS = [
+      "atlas",
+      "benchmark",
+      "fixer",
+      "forensic",
+      "metis",
+      "prometheus",
+      "repairer",
+      "sisyphus",
+      "themis",
+    ];
+    for (const legacy of LEGACY_ARCHIVED_AGENTS) {
+      const legacyFolder = join(nativeAgentsDir, legacy);
+      if (existsSync(legacyFolder)) {
+        try {
+          rmSync(legacyFolder, { recursive: true, force: true });
+        } catch {}
+      }
+      const legacyFlat = join(nativeAgentsDir, `${legacy}.md`);
+      if (existsSync(legacyFlat)) {
+        try {
+          rmSync(legacyFlat, { force: true });
         } catch {}
       }
     }
@@ -229,12 +259,26 @@ export function installWorkspacePlugin(
       }
     }
 
-    // Optional global installation into ~/.gemini/config/agents
+    // Optional global installation into ~/.gemini/config/agents and ~/.gemini/config/plugins/oma
     if (options.global) {
       const home = process.env.USERPROFILE || process.env.HOME;
       if (home) {
         const globalAgentsDir = join(home, ".gemini", "config", "agents");
         mkdirSync(globalAgentsDir, { recursive: true });
+        for (const legacy of LEGACY_ARCHIVED_AGENTS) {
+          const legacyFolder = join(globalAgentsDir, legacy);
+          if (existsSync(legacyFolder)) {
+            try {
+              rmSync(legacyFolder, { recursive: true, force: true });
+            } catch {}
+          }
+          const legacyFlat = join(globalAgentsDir, `${legacy}.md`);
+          if (existsSync(legacyFlat)) {
+            try {
+              rmSync(legacyFlat, { force: true });
+            } catch {}
+          }
+        }
         if (existsSync(agentsDir)) {
           for (const file of readdirSync(agentsDir)) {
             if (file.endsWith(".md")) {
@@ -245,6 +289,15 @@ export function installWorkspacePlugin(
             }
           }
         }
+
+        const globalPluginDir = join(home, ".gemini", "config", "plugins", "oma");
+        if (existsSync(globalPluginDir)) {
+          try {
+            rmSync(globalPluginDir, { recursive: true, force: true });
+          } catch {}
+        }
+        mkdirSync(globalPluginDir, { recursive: true });
+        cpSync(stagingDir, globalPluginDir, { recursive: true, force: true });
       }
     }
 
@@ -352,18 +405,6 @@ function deployCoreAgents(stagingDir: string): void {
         "---",
         "# OMA Memory Summarizer",
         "Compresses each interaction round into dense, factual context and actions records for the Neural Brain.",
-      ].join("\n"),
-    },
-    {
-      name: "fixer",
-      content: [
-        "---",
-        "name: fixer",
-        "description: OMA Fixer for targeted defect resolution and repairs",
-        "---",
-        "# OMA Fixer",
-        "Implements targeted fixes and surgical repairs derived from quality oracle diagnostics.",
-        "Produces clean diffs and tests before review handoff.",
       ].join("\n"),
     },
   ];
