@@ -298,6 +298,16 @@ export function installWorkspacePlugin(
         }
         mkdirSync(globalPluginDir, { recursive: true });
         cpSync(stagingDir, globalPluginDir, { recursive: true, force: true });
+
+        // For global plugin, do not hardcode a specific workspace root so it defaults to the active CWD
+        writeJson(join(globalPluginDir, "mcp_config.json"), {
+          mcpServers: {
+            "oma-broker": {
+              command: mcpCommand,
+              args: mcpArgs,
+            },
+          },
+        });
       }
     }
 
