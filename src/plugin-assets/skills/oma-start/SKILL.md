@@ -281,8 +281,7 @@ After each wave or upon mission completion:
 
 ---
 
-## 2. Legacy Detached Mode (Compatibility Fallback)
+## 2. In-Session Execution Policy
 
-If explicitly requested by the user or when running in environments where detached background execution is required:
-1. Call `run_mission` with `{"goal": "$ARGUMENTS"}`.
-2. Report the mission id and the watch command: `oma watch --mission <mission-id>`.
+Detached background process spawning has been retired. All OMA missions run natively within the active conversation session driven by the Conductor loop above.
+If `run_mission` or `resume_mission` is called programmatically, it initializes or resumes the mission for in-session orchestration (`mode: "session-native"`).

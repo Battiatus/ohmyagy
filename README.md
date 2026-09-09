@@ -68,7 +68,7 @@ oma resume --mission <mission-id>
 Après l'installation du bundle une seule fois avec `agy plugin install <chemin-vers-le-bundle-oma>`, tout OMA se pilote depuis la conversation AGY, sans jamais ouvrir de terminal. Chaque commande s'adosse à un outil du serveur MCP `oma-broker`.
 
 ```text
-/oma:run <objectif>          Démarrer une mission multi-agent pour cet objectif
+/oma:start <objectif>        Démarrer une mission multi-agent pour cet objectif
 /oma:status [mission-id]     État en direct : phase, vague, work items, vecteur de progrès
 /oma:list                    Toutes les missions du workspace, la plus récente en tête
 /oma:inspect [mission-id]    Chaîne de provenance : artefacts, revues, verdict terminal
@@ -80,10 +80,10 @@ Après l'installation du bundle une seule fois avec `agy plugin install <chemin-
 Un `mission-id` omis vise la mission active la plus récente. Aucune commande ne demande de chemin de gates, d'identifiant de mission, de modèle ni d'effort : OMA utilise les gates configurées à l'installation et laisse modèle et effort aux valeurs natives d'AGY.
 
 ```text
-/oma:run Corrige le problème X et valide les tests du projet.
+/oma:start Corrige le problème X et valide les tests du projet.
 ```
 
-> Les mêmes capacités restent disponibles hors conversation via le CLI (`oma status`, `oma inspect`, `oma resume`, `oma doctor`) pour l'usage scripté ou la CI.
+> Les mêmes capacités restent disponibles hors conversation via le CLI (`oma start`, `oma status`, `oma inspect`, `oma resume`, `oma doctor`) pour l'usage scripté ou la CI.
 
 ---
 

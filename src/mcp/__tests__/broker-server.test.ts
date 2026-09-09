@@ -24,7 +24,8 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
     assert.equal(existsSync(join(installed.pluginDir, "plugin.json")), true);
     assert.equal(existsSync(join(installed.pluginDir, "hooks.json")), true);
     assert.equal(existsSync(join(installed.pluginDir, "mcp_config.json")), true);
-    assert.equal(existsSync(join(installed.pluginDir, "commands", "run.md")), true);
+    assert.equal(existsSync(join(installed.pluginDir, "commands", "start.md")), true);
+    assert.equal(existsSync(join(installed.pluginDir, "commands", "run.md")), false);
     const combined = ["hooks.json", "mcp_config.json", "gates.json"]
       .map((name) => readFileSync(join(installed.pluginDir, name), "utf8"))
       .join("\n");
@@ -166,33 +167,48 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
   }
 });
 
-test("run_mission returns a watchable mission id without waiting for AGY", async () => {
+test("run_mission and resume_mission operate session-natively without detached processes", () => {
   const fixture = createRepository(false);
-  const previousAgyBinary = process.env.OMA_AGY_BIN;
   try {
     installWorkspacePlugin(fixture.root, { gates: [nodeGate("pass", "process.exit(0)")] });
     commitAll(fixture.root, "fixture with plugin");
-    process.env.OMA_AGY_BIN = join(fixture.root, "missing-agy.exe");
 
     const responses = runMcp(fixture.root, [
       initializeRequest(1),
-      toolCall(2, "run_mission", { goal: "Start without waiting for the worker process." }),
+      toolCall(2, "run_mission", { goal: "Start session-native mission." }),
+      toolCall(3, "resume_mission", {}),
+      toolCall(4, "resume_mission", { missionId: "nonexistent-mission" }),
     ]);
     const launched = resultFor(responses, 2);
     assert.equal(launched.isError, false);
     assert.ok(isRecord(launched.structuredContent));
     assert.equal(launched.structuredContent.status, "started");
+    assert.equal(launched.structuredContent.mode, "session-native");
+    assert.equal(launched.structuredContent.pid, undefined);
     const missionId = String(launched.structuredContent.missionId);
     assert.match(missionId, /^oma-\d+$/u);
+
+    // Detached ghost processes eliminated: no launcher.log exists
     const launcherLog = join(fixture.root, ".oma", "missions", missionId, "launcher.log");
-    assert.equal(existsSync(launcherLog), true);
-    await waitFor(() => existsSync(launcherLog) && readFileSync(launcherLog, "utf8").includes("[OMA ERROR]"));
+    assert.equal(existsSync(launcherLog), false);
+
+    // Durable journal event initialized for in-session orchestration
+    const eventsPath = join(fixture.root, ".oma", "missions", missionId, "events.jsonl");
+    assert.equal(existsSync(eventsPath), true);
+
+    // resume_mission confirms in-session resumption without detached spawn
+    const resumed = resultFor(responses, 3);
+    assert.equal(resumed.isError, false);
+    assert.ok(isRecord(resumed.structuredContent));
+    assert.equal(resumed.structuredContent.status, "resumed");
+    assert.equal(resumed.structuredContent.mode, "session-native");
+    assert.equal(resumed.structuredContent.missionId, missionId);
+
+    // resume_mission rejects unknown mission id
+    const nonExistent = resultFor(responses, 4);
+    assert.equal(nonExistent.isError, true);
+    assert.match(nonExistent.content?.[0]?.text ?? "", /Mission 'nonexistent-mission' was not found/);
   } finally {
-    if (previousAgyBinary === undefined) {
-      delete process.env.OMA_AGY_BIN;
-    } else {
-      process.env.OMA_AGY_BIN = previousAgyBinary;
-    }
     rmSync(fixture.container, { recursive: true, force: true });
   }
 });
@@ -280,15 +296,6 @@ test("T2.3: broker exposes and executes plan_route through MCP stdio protocol", 
     rmSync(fixture.container, { recursive: true, force: true });
   }
 });
-
-async function waitFor(check: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((done) => setTimeout(done, 50));
-  }
-  assert.fail("Timed out waiting for the detached mission process to finish.");
-}
 
 test("self-review (Author == Reviewer) is rejected during promote_change", { timeout: 30000 }, () => {
   const fixture = createRepository(false);

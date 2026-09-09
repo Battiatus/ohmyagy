@@ -1,8 +1,6 @@
-import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   type StagedTransaction,
   discardStagedTransaction,
@@ -24,6 +22,7 @@ import {
 } from "../ledger/mission-journal.js";
 import type { ReviewSubject, ReviewerVerdict } from "../orchestration/model.js";
 import {
+  ensureMissionStarted,
   findActiveMissionId,
   listMissions,
   loadMissionProjection,
@@ -236,7 +235,7 @@ export function handleRequest(
           {
             name: "run_mission",
             description:
-              "Run an OMA mission for a natural-language goal using this plugin's configured quality gates and AGY native model and effort defaults.",
+              "Initialize an OMA mission for session-native orchestration (zero detached background processes).",
             inputSchema: {
               type: "object",
               properties: {
@@ -280,7 +279,7 @@ export function handleRequest(
           {
             name: "resume_mission",
             description:
-              "Resume an interrupted OMA mission from its durable journal without re-running work that already succeeded. Targets the active mission when no missionId is given.",
+              "Resume an interrupted OMA mission for session-native orchestration without re-running work that already succeeded. Targets the active mission when no missionId is given.",
             inputSchema: {
               type: "object",
               properties: {
@@ -347,6 +346,7 @@ export function handleRequest(
         result.status !== "staged_pending_review" &&
         result.status !== "review_attested" &&
         result.status !== "started" &&
+        result.status !== "resumed" &&
         result.status !== "succeeded" &&
         result.status !== "reported" &&
         !(typeof result.status === "string" && BRAIN_SUCCESS_STATUSES.has(result.status)) &&
@@ -409,42 +409,32 @@ function executeMission(config: BrokerConfig, input: unknown): Record<string, un
     throw new Error("run_mission missionId must be a non-empty string when provided.");
   }
 
-  const missionId = typeof input.missionId === "string" ? input.missionId : `oma-${Date.now()}`;
-  return launchDetachedCli(config, missionId, ["run", missionId, "--goal", input.goal.trim()]);
+  const missionId = typeof input.missionId === "string" ? input.missionId.trim() : `oma-${Date.now()}`;
+  ensureMissionStarted(config.workspaceRoot, missionId, input.goal.trim());
+  return {
+    status: "started",
+    missionId,
+    mode: "session-native",
+    message: "Mission initialized for in-session orchestration. Use /oma:start or converge_step to drive execution.",
+  };
 }
 
 function executeResumeMission(config: BrokerConfig, input: unknown): Record<string, unknown> {
   const missionId = resolveMissionId(config, input);
-  return launchDetachedCli(config, missionId, ["resume", "--mission", missionId]);
-}
-
-function launchDetachedCli(
-  config: BrokerConfig,
-  missionId: string,
-  cliArgs: string[],
-): Record<string, unknown> {
-  const missionDir = join(config.workspaceRoot, ".oma", "missions", missionId);
-  mkdirSync(missionDir, { recursive: true });
-  const launcherLogPath = join(missionDir, "launcher.log");
-  const logDescriptor = openSync(launcherLogPath, "a");
-  let invocation;
-  try {
-    const omaCliPath = fileURLToPath(new URL("../../bin/oma.js", import.meta.url));
-    invocation = spawn(process.execPath, [omaCliPath, ...cliArgs], {
-      cwd: config.workspaceRoot,
-      detached: true,
-      windowsHide: true,
-      stdio: ["ignore", logDescriptor, logDescriptor],
-    });
-    invocation.unref();
-  } finally {
-    closeSync(logDescriptor);
+  const projection = loadMissionProjection(config.workspaceRoot, missionId);
+  if (projection.status === "succeeded") {
+    return {
+      status: "succeeded",
+      missionId,
+      mode: "session-native",
+      message: `Mission '${missionId}' has already succeeded.`,
+    };
   }
   return {
-    status: "started",
+    status: "resumed",
     missionId,
-    pid: invocation.pid,
-    launcherLogPath,
+    mode: "session-native",
+    message: "Mission resumed for in-session orchestration. Use /oma:start or converge_step to continue execution.",
   };
 }
 
@@ -455,7 +445,7 @@ function resolveMissionId(config: BrokerConfig, input: unknown): string {
       : undefined;
   const missionId = explicit ?? findActiveMissionId(config.workspaceRoot);
   if (!missionId) {
-    throw new Error("No active mission found. Provide a missionId or start one with run_mission.");
+    throw new Error("No active mission found. Provide a missionId or start one with /oma:start.");
   }
   return missionId;
 }

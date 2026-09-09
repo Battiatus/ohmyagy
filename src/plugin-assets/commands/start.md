@@ -32,4 +32,4 @@ Follow the skill's Conductor Execution Loop exactly:
 6. **Memory compaction**:
    - Call `brain_summarize` after each round or upon mission completion to persist context+actions records into the Neural Brain.
 
-Do **not** call `run_mission`: that launches a detached, out-of-session process with no conversation context. Use `/oma:run` only when the user explicitly wants a fire-and-forget detached mission.
+Do **not** call `run_mission`: detached background execution has been removed; all missions run natively in-session via this conductor loop.

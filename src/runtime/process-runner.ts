@@ -77,7 +77,7 @@ export class ProcessRunner {
         child = spawn(options.executable, options.args, {
           cwd: options.cwd,
           env: options.env ? { ...process.env, ...options.env } : process.env,
-          // Sous POSIX, detached: true crée un process group (setsid)
+          // Sous POSIX, un nouveau process group est créé (setsid)
           detached: !isWindows,
           windowsHide: options.windowsHide ?? true,
           stdio: ["pipe", "pipe", "pipe"],
@@ -335,7 +335,6 @@ export class ProcessRunner {
       spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", psScript], {
         windowsHide: true,
         stdio: "ignore",
-        detached: true,
       }).unref();
     } catch {
       // En cas d'indisponibilité de PowerShell, le mécanisme taskkill en fallback reste actif

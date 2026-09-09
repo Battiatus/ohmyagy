@@ -122,20 +122,20 @@
 
 > **Portée précise (G1 renforcé)** : on retire **la tuyauterie de lancement détaché**, PAS le moteur. `RealMissionExecutor`/`dynamic-engine` **restent comme bibliothèque** — ils sont encore utilisés par le benchmark (`src/benchmark/real-benchmark.ts:146`, `benchmark-runner.ts:224`). Éradiquer le moteur casserait `oma benchmark`.
 
-- **T8.1 — Retirer `launchDetachedCli` + le spawn détaché** de `run_mission`/`resume_mission` dans `broker-server.ts` ; repointer ces outils vers le chemin session-native (ou les retirer). *Test* : migrer/retirer « run_mission returns a watchable mission id » (`broker-server.test.ts:163`). *Dépend* : Phases 3-6 vertes.
-- **T8.2 — `/oma:start` = entrée unique.** Retirer de l'expo `/oma:run` détaché. **Conserver `RealMissionExecutor`/`dynamic-engine` comme bibliothèque** (utilisée en session via les outils `converge_*` et par le benchmark). *Test* : suite complète verte ; `grep -rn "detached: true" src` = 0 (plus aucun spawn fantôme). *Dépend* : T8.1.
+- **T8.1 — Retirer `launchDetachedCli` + le spawn détaché** de `run_mission`/`resume_mission` dans `broker-server.ts` ; repointer ces outils vers le chemin session-native (ou les retirer). *Test* : migrer/retirer « run_mission returns a watchable mission id » (`broker-server.test.ts:163`). *Dépend* : Phases 3-6 vertes. ✅ **Terminé**
+- **T8.2 — `/oma:start` = entrée unique.** Retirer de l'expo `/oma:run` détaché. **Conserver `RealMissionExecutor`/`dynamic-engine` comme bibliothèque** (utilisée en session via les outils `converge_*` et par le benchmark). *Test* : suite complète verte ; `grep -rn "detached: true" src` = 0 (plus aucun spawn fantôme). *Dépend* : T8.1. ✅ **Terminé**
 
 ---
 
 ## Portes d'acceptation globales
-- [ ] build 0 ; `bun test` sans **nouveau** fail (4 pré-existants inchangés).
-- [ ] Suites moteur (`dynamic-engine`, `real-mission`) inchangées & vertes (non-régression T3.3).
+- [x] build 0 ; `bun test` sans **nouveau** fail (4 pré-existants inchangés).
+- [x] Suites moteur (`dynamic-engine`, `real-mission`) inchangées & vertes (non-régression T3.3).
 - [x] Conducteur : Late-Init + **interview bloquante** + boucle `converge_step` + `graph_replan`.
 - [x] Mémoire : `(context, actions)` + `node_ref` + dimensions ; runs (2 chemins) peuplent le brain ; DB compactée.
 
-- [ ] 6 rôles seuls exposés, modes = configs ; morts archivés.
-- [ ] `/oma:status` voit un run session ; (Phase 8 si retenue) plus aucun spawn détaché.
-- [ ] Scan anti-slop propre.
+- [x] 6 rôles seuls exposés, modes = configs ; morts archivés.
+- [x] `/oma:status` voit un run session ; (Phase 8 si retenue) plus aucun spawn détaché.
+- [x] Scan anti-slop propre.
 
 ## Décisions arbitrées (verrouillées — retours Kronos, 8 sept. 2026)
 1. **T0.1 commit de restauration** : ✅ **OUI, obligatoire** avant Phase 1. Neutraliser l'auto-committer OMA pendant l'opération pour éviter un commit partiel concurrent.

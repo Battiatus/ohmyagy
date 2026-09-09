@@ -11,4 +11,4 @@ Call the `resume_mission` tool exposed by the `oma-broker` MCP server with:
 {"missionId":"$ARGUMENTS"}
 ```
 
-An empty `missionId` targets the most recently active mission. Report the returned mission id and confirm the run relaunched. Do not ask for a model, effort, gates path, timeout, concurrency, or wave count — the plugin supplies its installed quality gates and leaves model and effort to AGY's native defaults. After resuming, suggest `/oma:status` to follow progress.
+An empty `missionId` targets the most recently active mission. Report the returned mission id and confirm the mission is resumed for in-session orchestration. Do not ask for a model, effort, gates path, timeout, concurrency, or wave count — the plugin supplies its installed quality gates and leaves model and effort to AGY's native defaults. After resuming, continue in-session orchestration via `/oma:start` or `converge_step`.
