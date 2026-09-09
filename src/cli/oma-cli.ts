@@ -5,6 +5,7 @@ import { installWorkspacePlugin } from "../packaging/install.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
 import { MissionProjectionEngine } from "../graph/mission-projections.js";
 import {
+  eventsPathFor,
   findActiveMissionId,
   loadMissionProjection,
   summarizeMission,
@@ -76,6 +77,17 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
         } else {
           console.error("No active or specified mission found in .oma/missions/");
         }
+        return 1;
+      }
+
+      const eventsPath = eventsPathFor(workspaceRoot, missionId);
+      if (!existsSync(eventsPath)) {
+        if (isJson) {
+          const projection = MissionProjectionEngine.project([]);
+          console.log(JSON.stringify(projection, null, 2));
+          return 0;
+        }
+        console.error(`Mission '${missionId}' was not found.`);
         return 1;
       }
 
@@ -180,6 +192,11 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
       }
 
       if (!existsSync(eventsPath)) {
+        if (isJson) {
+          const projection = MissionProjectionEngine.project([]);
+          console.log(JSON.stringify(projection.provenance, null, 2));
+          return 0;
+        }
         console.error(`Mission '${missionId}' events file not found at ${eventsPath}`);
         return 1;
       }

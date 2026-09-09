@@ -135,7 +135,14 @@ describe("Phase 5 — Interruption, Reprise & Suivi (Gate Observable)", () => {
       assert.equal(postProj.workGraph.acceptedSet.length, 2, "Both math and parser must be accepted");
       assert.equal(postProj.progress.acceptedWorkItems, 2);
     } finally {
-      rmSync(testDir, { recursive: true, force: true });
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          rmSync(testDir, { recursive: true, force: true });
+          if (!existsSync(testDir)) break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        }
+      }
     }
   });
 });

@@ -49,7 +49,14 @@ test("real benchmark preserves per-trial evidence before isolated worktrees are 
     assert.ok(existsSync(result.resultsFilePath));
     assert.ok(existsSync(result.reportFilePath));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+        if (!existsSync(root)) break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+    }
   }
 });
 
