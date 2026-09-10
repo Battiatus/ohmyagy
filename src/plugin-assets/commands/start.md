@@ -14,9 +14,10 @@ Follow the skill's Conductor Execution Loop exactly:
    - Level 2: Cross-session SQLite facts (`brain_query`) and graph state (`converge_status` / `graph_inspect`).
    - Level 3: Session transcript file if accessible, otherwise omit gracefully.
 2. **Mandatory blocking surgical interview gate**:
+   - **CRITICAL**: Do NOT browse, grep, or read repository code files at this stage. Respond immediately with the interview.
    - Synthesize and summarize understood scope in 2-3 sentences.
    - Ask 2-3 targeted questions strictly on real frictions (measurable goals, technical constraints, architecture choice, required mode).
-   - **MANDATORY**: Zero run/execution before explicit user answers and confirmation.
+   - **MANDATORY**: Zero run/execution before explicit user answers and confirmation. Halt and wait for user response.
 3. **Mode selection & canonical role routing**:
    - Call `plan_route` with the confirmed mode to retrieve authorized roles subset and `ModeConfig` overlay.
 4. **Graph initialization & plan formulation**:

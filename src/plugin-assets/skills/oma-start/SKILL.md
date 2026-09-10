@@ -48,6 +48,13 @@ When invoked (at initial launch or mid-conversation / late-init), the Conductor 
 ---
 
 ### Step 2: Mandatory Blocking Surgical Interview Gate
+> [!CRITICAL]
+> **IMMEDIATE INTERVIEW RESPONSE — ZERO SOURCE CODE BROWSING AT STEPS 1 & 2**:
+> In Step 1 and Step 2, the Conductor MUST NOT browse or read repository code files (do NOT call `list_dir`, `view_file`, `grep_search`, `find_by_name`).
+> Even if the user's prompt asks complex questions about codebase architecture, database schemas, or technical debt, **DO NOT attempt to investigate or answer them during the interview phase**.
+> Formulate the 2-3 sentence summary and 2-3 friction questions based purely on the user's objective, output them immediately in your very first response, and HALT execution to await user confirmation.
+> Deep codebase analysis belongs exclusively to the `explorer` role dispatched in Wave 1 AFTER user confirmation.
+
 Before ANY execution, graph initialization, or file mutation, the Conductor MUST execute a strict, blocking alignment interview.
 
 **The interview sequence is strictly enforced:**
