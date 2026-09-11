@@ -27,7 +27,15 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
     if (command === "doctor") {
       const report = OmaDoctor.diagnoseEnvironment(workspaceRoot);
       console.log(JSON.stringify(report, null, 2));
-      return args.includes("--strict") && !runtimeIsReady(report) ? 1 : 0;
+      if (args.includes("--strict") && !runtimeIsReady(report)) return 1;
+      // --attest fails on the layered checks: install, then load (hooks the AGY
+      // runtime actually accepted) and test (the broker really answers with the
+      // conductor's tool surface). --strict above stays a static check.
+      if (args.includes("--attest")) {
+        if (!report.attestation.loaded.ok) return 1;
+        if (!report.attestation.tested.ok) return 1;
+      }
+      return 0;
     }
 
     if (command === "start") {
@@ -72,10 +80,34 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
       const missionId = missionFlagIdx !== -1 ? args[missionFlagIdx + 1] : findActiveMissionId(workspaceRoot);
 
       if (!missionId) {
+        const graphDir = join(workspaceRoot, ".oma", "graph");
+        const sessionPointer = join(graphDir, "session-mission-id");
+        const executionGraph = join(graphDir, "execution-graph.json");
+        const missionsPath = join(workspaceRoot, ".oma", "missions");
         if (isJson) {
-          console.log(JSON.stringify({ error: "No active or specified mission found in workspace." }, null, 2));
+          console.log(
+            JSON.stringify(
+              {
+                error: "No active mission found.",
+                searched: {
+                  sessionGraphPointer: sessionPointer,
+                  executionGraph,
+                  missionJournals: missionsPath,
+                },
+                hint: "No mission has ever been initialized in this workspace. The absence of `.oma/` is the expected result, not a lost pointer.",
+                next: "Start one with /oma-start (session-native) or `oma start <goal>`.",
+              },
+              null,
+              2,
+            ),
+          );
         } else {
-          console.error("No active or specified mission found in .oma/missions/");
+          console.error("No active mission found in this workspace.");
+          console.error(`  Session graph pointer: ${sessionPointer}`);
+          console.error(`  Execution graph:       ${executionGraph}`);
+          console.error(`  Mission journals:      ${missionsPath}`);
+          console.error("  None of these exist, so no mission was ever initialized here.");
+          console.error("  Start one with /oma-start (in-session) or `oma start <goal>`.");
         }
         return 1;
       }
@@ -548,7 +580,7 @@ function printHelp(): void {
 
 Usage:
   oma install [--force|-f] [--global|-g]         Install all OMA experts, skills, and plugins (workspace or global)
-  oma doctor [--strict]                          Diagnose local Antigravity environment and capabilities
+  oma doctor [--strict] [--attest]                Diagnose environment; --attest also requires hooks loaded + broker tested
   oma start <goal> [run options]                 Start a mission without supplying a mission id
   oma run <mission-id> --goal <goal> [options]   Execute multi-agent development mission
       Options:
