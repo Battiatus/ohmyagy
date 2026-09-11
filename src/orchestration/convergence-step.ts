@@ -61,24 +61,34 @@ export function evaluateConvergenceStep(input: ConvergenceStepInput): Convergenc
   const succeededNodes = projection.nodes.filter((node) => node.state === "succeeded");
   const failedNodes = projection.nodes.filter((node) => node.state === "failed");
 
-  // 2. Resolve current progress vector
-  let currentProgress: ProgressVector;
-  if (input.currentProgress) {
-    currentProgress = input.currentProgress;
-  } else if (input.progressHistory.length > 0) {
-    currentProgress = input.progressHistory[input.progressHistory.length - 1];
-  } else {
-    currentProgress = {
-      hiddenTestsFailing: 0,
-      hiddenTestsPassed: 0,
-      visibleTestsFailing: 0,
-      visibleTestsPassed: 0,
-      gateFailures: failedNodes.length,
-      openDiagnosticsCount: failedNodes.length,
-      acceptedWorkItems: succeededNodes.length,
-      totalWorkItems: graph.nodes.length,
-    };
-  }
+  // 2. Resolve the progress vector.
+  //
+  // The GRAPH owns work-item counts; a caller may only supply the counters the
+  // broker cannot observe (test and gate results). Trusting a caller-supplied
+  // vector outright is what let a conductor claim success while reporting
+  // `0/1 accepted` with a node still `ready`.
+  const derived: ProgressVector = {
+    hiddenTestsFailing: 0,
+    hiddenTestsPassed: 0,
+    visibleTestsFailing: 0,
+    visibleTestsPassed: 0,
+    gateFailures: failedNodes.length,
+    openDiagnosticsCount: failedNodes.length,
+    acceptedWorkItems: succeededNodes.length,
+    totalWorkItems: graph.nodes.length,
+  };
+  const supplied = input.currentProgress;
+  const currentProgress: ProgressVector = supplied
+    ? {
+        ...derived,
+        hiddenTestsFailing: supplied.hiddenTestsFailing,
+        hiddenTestsPassed: supplied.hiddenTestsPassed,
+        visibleTestsFailing: supplied.visibleTestsFailing,
+        visibleTestsPassed: supplied.visibleTestsPassed,
+        gateFailures: supplied.gateFailures,
+        openDiagnosticsCount: supplied.openDiagnosticsCount,
+      }
+    : derived;
 
   // 3. Assemble complete progress vector history for stagnation tracking
   let fullHistory: ProgressVector[];
@@ -121,19 +131,32 @@ export function evaluateConvergenceStep(input: ConvergenceStepInput): Convergenc
   // 5. Evaluate Convergence Status Hierarchy
 
   // Priority A: Success / Full Convergence
+  //
+  // Success requires DELIVERED work. A graph whose only completed node is the
+  // engine seed (`bootstrap`) has proven nothing, which is why a bare
+  // `graph_init` used to report the mission as succeeded at revision 1.
+  //
+  // `isIntegrated` may veto — the caller states integration has not happened —
+  // but it can never FORCE success. It used to short-circuit the whole check, so
+  // `converge_step({isIntegrated:true})` returned `succeeded` with a node still
+  // `ready` and 0/1 accepted.
+  const deliveredWorkItems = projection.nodes.filter(
+    (node) => !node.synthetic && node.state === "succeeded",
+  ).length;
   const isAllNodesSucceeded =
     projection.nodes.length > 0 &&
     projection.status === "succeeded" &&
+    deliveredWorkItems > 0 &&
     currentProgress.hiddenTestsFailing === 0 &&
     currentProgress.visibleTestsFailing === 0 &&
     currentProgress.gateFailures === 0;
 
-  if (input.isIntegrated === true || (input.isIntegrated !== false && isAllNodesSucceeded)) {
+  if (isAllNodesSucceeded && input.isIntegrated !== false) {
     return {
       readyNodes,
       progress: currentProgress,
       status: "succeeded",
-      diagnosis: "Objectives converged and integrated successfully.",
+      diagnosis: `Objectives converged: ${deliveredWorkItems} delivered work item(s) verified.`,
       consecutiveNoProgressRounds: consecutiveNoProgress,
       totalRounds,
     };

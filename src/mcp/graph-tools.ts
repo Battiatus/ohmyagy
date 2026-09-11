@@ -313,6 +313,10 @@ export function executeGraphInit(
         activation: "all",
         completionAuthority: "scheduler",
         completionAuthorityId: schedulerAuthorityId,
+        // Engine-seeded, not requested work. It exists only so revision 1 has a
+        // parent for the first proposal. Marking it synthetic keeps a bare
+        // `graph_init` from reporting the mission as succeeded.
+        synthetic: true,
       };
       initialGraph = {
         schemaVersion: 2,
@@ -377,11 +381,19 @@ export function executeGraphInit(
     } catch {}
   }
 
+  const deliverableNodes = runtime.graph.nodes.filter(
+    (node: GraphNode) => node.synthetic !== true,
+  ).length;
+
   return {
     status: "initialized",
     missionId,
     graphId: runtime.graph.graphId,
     revision: runtime.graph.revision,
+    deliverableNodes,
+    // Only the engine seed exists, so nothing has been delivered. The conductor
+    // must propose real nodes; `graph_status` cannot be "succeeded" here.
+    requiresPlan: deliverableNodes === 0,
     paths: {
       definition: paths.definition,
       events: paths.events,

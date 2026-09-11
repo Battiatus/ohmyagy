@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord, sha256 } from "../ledger/canonical.js";
 import { GraphBroker, GraphBrokerError } from "../graph/broker.js";
@@ -180,6 +180,33 @@ function resolveMissionId(workspaceRoot: string, input: unknown): string {
   return findActiveMissionId(workspaceRoot) ?? "oma-session";
 }
 
+/**
+ * Refuse to render a verdict for a mission that does not own the workspace graph.
+ *
+ * The graph store is a single workspace slot bound to one mission at a time
+ * (`.oma/graph/session-mission-id`). Without this guard,
+ * `converge_step({missionId: "unrelated-mission"})` evaluated ANOTHER mission's
+ * graph, wrote a journal for the foreign mission, and the CLI then reported that
+ * empty-journal mission as `succeeded` — a success verdict attributed to work the
+ * mission never did.
+ */
+function assertMissionOwnsGraph(workspaceRoot: string, missionId: string): void {
+  const pointerPath = join(workspaceRoot, ".oma", "graph", "session-mission-id");
+  if (!existsSync(pointerPath)) return;
+  let owner: string;
+  try {
+    owner = readFileSync(pointerPath, "utf8").trim();
+  } catch {
+    return;
+  }
+  if (owner.length > 0 && owner !== missionId) {
+    throw new Error(
+      `Mission '${missionId}' does not own the workspace execution graph, which belongs to '${owner}'. ` +
+        "A verdict cannot be rendered for another mission's work.",
+    );
+  }
+}
+
 function readProgressHistoryFromEvents(workspaceRoot: string, missionId: string): ProgressVector[] {
   const eventsPath = eventsPathFor(workspaceRoot, missionId);
   if (!existsSync(eventsPath)) return [];
@@ -203,6 +230,7 @@ export function executeConvergeStep(
   injectedBrain?: BrainStore,
 ): Record<string, unknown> {
   const missionId = resolveMissionId(workspaceRoot, input);
+  assertMissionOwnsGraph(workspaceRoot, missionId);
   const paths = graphPaths(workspaceRoot);
 
   if (!existsSync(paths.definition) && !existsSync(paths.events)) {

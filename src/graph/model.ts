@@ -29,6 +29,14 @@ export interface GraphNode {
   activation: GraphActivation;
   completionAuthority: GraphAuthority;
   completionAuthorityId: string;
+  /**
+   * True for nodes the engine seeds itself rather than work the mission asked
+   * for. A synthetic node can be completed so dependents unblock, but it never
+   * counts as a delivered work item and can never make a mission succeed. The
+   * seeded `bootstrap` node is the only current example: without this flag a
+   * bare `graph_init` reported the whole graph as `succeeded` at revision 1.
+   */
+  synthetic?: boolean;
   executor?: GraphExecutor;
   scope?: string[];
   acceptance?: GraphNodeAcceptance[];
@@ -139,10 +147,11 @@ function parseNode(value: unknown, index: number, schemaVersion: 1 | 2): GraphNo
       "completionAuthority",
       "completionAuthorityId",
       "executor",
+      "synthetic",
       ...(schemaVersion === 2 ? contractFields : []),
     ],
     `node[${index}]`,
-    ["executor", ...(schemaVersion === 2 ? contractFields : [])],
+    ["executor", "synthetic", ...(schemaVersion === 2 ? contractFields : [])],
   );
   const kind = requireEnum(value, "kind", ["agent", "broker", "gate", "join", "human"]);
   const completionAuthority = requireEnum(value, "completionAuthority", [
@@ -184,6 +193,9 @@ function parseNode(value: unknown, index: number, schemaVersion: 1 | 2): GraphNo
       if (field in value) throw new Error(`Only agent nodes may define ${field}`);
     }
   }
+  if ("synthetic" in value && typeof value.synthetic !== "boolean") {
+    throw new Error(`node[${index}].synthetic must be a boolean`);
+  }
   return {
     id: requireString(value, "id"),
     title: requireString(value, "title"),
@@ -191,6 +203,7 @@ function parseNode(value: unknown, index: number, schemaVersion: 1 | 2): GraphNo
     activation: requireEnum(value, "activation", ["all", "any"]),
     completionAuthority,
     completionAuthorityId: requireString(value, "completionAuthorityId"),
+    ...(value.synthetic === true ? { synthetic: true as const } : {}),
     ...(executor ? { executor } : {}),
     ...(scope ? { scope } : {}),
     ...(acceptance ? { acceptance } : {}),

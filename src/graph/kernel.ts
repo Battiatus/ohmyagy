@@ -14,6 +14,8 @@ export interface ProjectedNode {
   title: string;
   kind: ExecutionGraph["nodes"][number]["kind"];
   state: NodeState;
+  /** Seeded by the engine; completing it is not delivered work. */
+  synthetic: boolean;
   dispatchId?: string;
   evidenceHash?: string;
 }
@@ -106,6 +108,7 @@ function deriveProjection(
         title: node.title,
         kind: node.kind,
         state: nodeStates.get(node.id) ?? "blocked",
+        synthetic: node.synthetic === true,
         ...(explicit?.dispatchId ? { dispatchId: explicit.dispatchId } : {}),
         ...(explicit?.evidenceHash ? { evidenceHash: explicit.evidenceHash } : {}),
       };
@@ -185,11 +188,20 @@ function deriveGraphStatus(
 ): GraphProjection["status"] {
   if (nodes.some((node) => node.state === "running")) return "running";
   if (readySet.length > 0) return "ready";
+  // A graph with no node has declared no work at all; it is not a success.
+  if (nodes.length === 0) return "stalled";
   const terminal = nodes.every((node) =>
     ["succeeded", "failed", "skipped"].includes(node.state),
   );
   if (!terminal) return "stalled";
   const outgoingSources = new Set(graph.edges.map((edge) => edge.from));
   const sinks = nodes.filter((node) => !outgoingSources.has(node.id));
-  return sinks.some((node) => node.state === "failed") ? "failed" : "succeeded";
+  if (sinks.some((node) => node.state === "failed")) return "failed";
+  // Succeeding requires delivered work. A terminal graph whose only completed
+  // nodes are engine-seeded (the `bootstrap` seed) has proven nothing: before
+  // this guard, `graph_init` alone reported `succeeded` with one synthetic node
+  // and 100% progress, so a conductor could declare victory with zero artifacts.
+  const deliveredWork = nodes.some((node) => !node.synthetic && node.state === "succeeded");
+  if (!deliveredWork) return "stalled";
+  return "succeeded";
 }

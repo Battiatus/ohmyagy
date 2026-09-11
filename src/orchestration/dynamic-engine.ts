@@ -492,6 +492,25 @@ export class DynamicConvergenceEngine {
           stagedDiffDigest: diffHash,
         });
 
+        // Close the node in the graph. Until this existed the engine only ever
+        // emitted `node_dispatched`, so its projection could never reach
+        // `succeeded` and convergence silently depended on the caller asserting
+        // `isIntegrated: true` — the bypass that let a mission be declared
+        // successful with no delivered work recorded in its own graph.
+        if (graphRuntime) {
+          try {
+            appendGraphTransition(graphRuntime, {
+              eventType: "node_completed",
+              nodeId: mat.workItemId,
+              dispatchId: `disp-${mat.workItemId}`,
+              outcome: isWorkerSuccess ? "success" : "failure",
+              authority: "broker",
+              authorityId: "oma-dynamic-engine",
+              evidenceHash: diffHash,
+            });
+          } catch {}
+        }
+
         try {
           await worktreePool.release(mat.workItemId, true);
         } catch {}
