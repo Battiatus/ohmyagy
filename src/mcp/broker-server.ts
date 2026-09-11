@@ -392,7 +392,34 @@ export function handleRequest(
       };
     }
   }
-  throw new Error(`Unsupported MCP method: ${request.method}`);
+  if (request.method === "ping") {
+    return { jsonrpc: "2.0", id: request.id, result: {} };
+  }
+  // Handshake probes a client performs to learn the server's surface. This
+  // server only advertises the `tools` capability, but it must answer these
+  // with a VALID empty result rather than an error: AGY's client treats a
+  // mismatched or error reply during initialize as a protocol violation and
+  // abandons the server (`connection closed: calling "initialize": ... invalid
+  // request`), which silently removed every OMA tool from the session.
+  if (request.method === "resources/list") {
+    return { jsonrpc: "2.0", id: request.id, result: { resources: [] } };
+  }
+  if (request.method === "resources/templates/list") {
+    return { jsonrpc: "2.0", id: request.id, result: { resourceTemplates: [] } };
+  }
+  if (request.method === "prompts/list") {
+    return { jsonrpc: "2.0", id: request.id, result: { prompts: [] } };
+  }
+  if (request.method === "logging/setLevel") {
+    return { jsonrpc: "2.0", id: request.id, result: {} };
+  }
+  // Unknown methods must still echo the request id and use the correct code:
+  // "Method not found" is -32601, not the -32700 parse error this used to emit.
+  return {
+    jsonrpc: "2.0",
+    id: request.id ?? null,
+    error: { code: -32601, message: `Method not found: ${request.method}` },
+  };
 }
 
 function negotiateProtocolVersion(requested: unknown): string {
