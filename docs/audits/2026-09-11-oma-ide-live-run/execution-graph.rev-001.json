@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "graphId": "graph-mission-1789144666489",
+  "revision": 1,
+  "schedulerAuthorityId": "oma-scheduler",
+  "nodes": [
+    {
+      "id": "bootstrap",
+      "title": "Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique",
+      "kind": "join",
+      "activation": "all",
+      "completionAuthority": "scheduler",
+      "completionAuthorityId": "oma-scheduler"
+    }
+  ],
+  "edges": []
+}

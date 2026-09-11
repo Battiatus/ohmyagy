@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "graphId": "graph-mission-1789144666489",
+  "revision": 2,
+  "schedulerAuthorityId": "oma-scheduler",
+  "nodes": [
+    {
+      "id": "bootstrap",
+      "title": "Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique",
+      "kind": "join",
+      "activation": "all",
+      "completionAuthority": "scheduler",
+      "completionAuthorityId": "oma-scheduler"
+    },
+    {
+      "id": "explore_arch",
+      "title": "Audit de l'architecture globale et du statut de la solution",
+      "kind": "agent",
+      "activation": "all",
+      "completionAuthority": "broker",
+      "completionAuthorityId": "oma-broker",
+      "executor": {
+        "adapter": "antigravity",
+        "persona": "oma-explorer"
+      }
+    },
+    {
+      "id": "explore_dbs",
+      "title": "Audit des bases de données, ORM, synchronisation et schéma",
+      "kind": "agent",
+      "activation": "all",
+      "completionAuthority": "broker",
+      "completionAuthorityId": "oma-broker",
+      "executor": {
+        "adapter": "antigravity",
+        "persona": "oma-explorer"
+      }
+    },
+    {
+      "id": "explore_debt",
+      "title": "Audit approfondi de la dette technique",
+      "kind": "agent",
+      "activation": "all",
+      "completionAuthority": "broker",
+      "completionAuthorityId": "oma-broker",
+      "executor": {
+        "adapter": "antigravity",
+        "persona": "oma-explorer"
+      }
+    },
+    {
+      "id": "review_synthesis",
+      "title": "Synthèse d'audit, stratégie de fusion et rapport complet",
+      "kind": "agent",
+      "activation": "all",
+      "completionAuthority": "broker",
+      "completionAuthorityId": "oma-broker",
+      "executor": {
+        "adapter": "antigravity",
+        "persona": "oma-reviewer"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_bootstrap_to_explore_arch",
+      "from": "bootstrap",
+      "to": "explore_arch",
+      "when": "success"
+    },
+    {
+      "id": "edge_explore_arch_to_explore_dbs",
+      "from": "explore_arch",
+      "to": "explore_dbs",
+      "when": "success"
+    },
+    {
+      "id": "edge_explore_arch_to_explore_debt",
+      "from": "explore_arch",
+      "to": "explore_debt",
+      "when": "success"
+    },
+    {
+      "id": "edge_explore_dbs_to_review_synthesis",
+      "from": "explore_dbs",
+      "to": "review_synthesis",
+      "when": "success"
+    },
+    {
+      "id": "edge_explore_debt_to_review_synthesis",
+      "from": "explore_debt",
+      "to": "review_synthesis",
+      "when": "success"
+    }
+  ]
+}

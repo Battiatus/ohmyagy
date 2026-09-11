@@ -36,6 +36,16 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
       if (args.includes("--attest")) {
         if (!report.attestation.loaded.ok) return 1;
         if (!report.attestation.tested.ok) return 1;
+        // A broker that governs the editor's own install tree answers every other
+        // check correctly while pointing at a workspace nobody asked about. That
+        // is a configuration failure, so it fails attestation instead of passing.
+        if (report.workspace.governsEditorInstall) {
+          console.error(
+            `OMA governs the editor installation directory, not a project: ${report.workspace.root}\n` +
+              `No workspace was stated, so the server fell back to its own cwd. Set OMA_WORKSPACE_ROOT (or the MCP 'cwd') to the project root.`,
+          );
+          return 1;
+        }
       }
       return 0;
     }
@@ -524,6 +534,11 @@ function boundedInterval(args: string[]): number {
 
 function requireRuntime(workspaceRoot: string): void {
   const report = OmaDoctor.diagnoseEnvironment(workspaceRoot);
+  if (report.workspace.governsEditorInstall) {
+    throw new Error(
+      `OMA would run against the editor installation directory (${report.workspace.root}) instead of a project. State the workspace explicitly with OMA_WORKSPACE_ROOT before starting a mission.`,
+    );
+  }
   if (!runtimeIsReady(report)) {
     throw new Error("OMA requires a verified AntiGravity runtime and a live-attested workspace plugin. Run 'oma doctor --strict'.");
   }

@@ -1,5 +1,5 @@
 {
-  "fixtureRoot": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw",
+  "fixtureRoot": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml",
   "probes": {
     "bootstrap": [
       {
@@ -9,18 +9,20 @@
           "missionId": "mission-a",
           "graphId": "graph-mission-a",
           "revision": 1,
+          "deliverableNodes": 0,
+          "requiresPlan": true,
           "paths": {
-            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\bootstrap-OGKDlj\\.oma\\graph\\execution-graph.json",
-            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\bootstrap-OGKDlj\\.oma\\graph\\events.jsonl",
-            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\bootstrap-OGKDlj\\.oma\\graph\\head.json"
+            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\bootstrap-hlIlPX\\.oma\\graph\\execution-graph.json",
+            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\bootstrap-hlIlPX\\.oma\\graph\\events.jsonl",
+            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\bootstrap-hlIlPX\\.oma\\graph\\head.json"
           }
         }
       },
       {
         "isError": false,
         "data": {
-          "status": "succeeded",
-          "convergenceStatus": "succeeded",
+          "status": "in_progress",
+          "convergenceStatus": "in_progress",
           "missionId": "mission-a",
           "readyNodes": [],
           "progress": {
@@ -33,7 +35,7 @@
             "acceptedWorkItems": 1,
             "totalWorkItems": 1
           },
-          "diagnosis": "Objectives converged and integrated successfully.",
+          "diagnosis": "In progress: awaiting next wave or node transitions.",
           "consecutiveNoProgressRounds": 0,
           "totalRounds": 1,
           "graphRevision": 1
@@ -49,7 +51,7 @@
     ],
     "bootstrapStatus": {
       "exitCode": 0,
-      "status": "succeeded",
+      "status": "in_progress",
       "missionId": "mission-a",
       "progress": {
         "hiddenTestsFailing": 0,
@@ -75,10 +77,12 @@
           "missionId": "mission-a",
           "graphId": "graph-mission-a",
           "revision": 1,
+          "deliverableNodes": 1,
+          "requiresPlan": false,
           "paths": {
-            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\progress-rhde8r\\.oma\\graph\\execution-graph.json",
-            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\progress-rhde8r\\.oma\\graph\\events.jsonl",
-            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\progress-rhde8r\\.oma\\graph\\head.json"
+            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\progress-vF45pm\\.oma\\graph\\execution-graph.json",
+            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\progress-vF45pm\\.oma\\graph\\events.jsonl",
+            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\progress-vF45pm\\.oma\\graph\\head.json"
           }
         }
       },
@@ -93,7 +97,8 @@
               "id": "audit-task",
               "title": "Read-only audit task",
               "kind": "agent",
-              "state": "ready"
+              "state": "ready",
+              "synthetic": false
             }
           ],
           "progress": {
@@ -121,7 +126,7 @@
           "dispatchId": "audit-dispatch",
           "event": {
             "sequence": 1,
-            "timestamp": "2026-09-11T10:16:40.609Z",
+            "timestamp": "2026-09-11T16:55:26.782Z",
             "graphId": "graph-mission-a",
             "graphRevision": 1,
             "graphHash": "028d5936e5906cd667d9d27beb66052bcb0eb0a5e0f44c186da8337d24985ccf",
@@ -130,7 +135,7 @@
             "authority": "scheduler",
             "authorityId": "oma-scheduler",
             "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
-            "eventHash": "84cf4d0b6a2cbec9b46de9bf8e8b0689d66e394dcf5a6c242a281d61bfecf3ca",
+            "eventHash": "10e466e3ca224edc3fd7225ee621791777e3f6fb413a084a5d627c93d1e98e55",
             "eventType": "node_dispatched"
           },
           "readySet": []
@@ -145,7 +150,7 @@
           "dispatchId": "audit-dispatch",
           "event": {
             "sequence": 2,
-            "timestamp": "2026-09-11T10:16:40.614Z",
+            "timestamp": "2026-09-11T16:55:26.787Z",
             "graphId": "graph-mission-a",
             "graphRevision": 1,
             "graphHash": "028d5936e5906cd667d9d27beb66052bcb0eb0a5e0f44c186da8337d24985ccf",
@@ -153,8 +158,8 @@
             "dispatchId": "audit-dispatch",
             "authority": "broker",
             "authorityId": "oma-broker",
-            "previousHash": "84cf4d0b6a2cbec9b46de9bf8e8b0689d66e394dcf5a6c242a281d61bfecf3ca",
-            "eventHash": "59ea3502e672176b02d27181e5293dccb1472d0a8a0c24b018d520321843a4cc",
+            "previousHash": "10e466e3ca224edc3fd7225ee621791777e3f6fb413a084a5d627c93d1e98e55",
+            "eventHash": "dd0134b13ae269561fabc47b6eaaa6d42085e147cab28f50b4536d0657475b60",
             "eventType": "node_completed",
             "outcome": "success",
             "evidenceHash": "a3716af21593e44e3c1ca05c5a540b768777ca26fdf1b9e9931e5aa9fde326d9"
@@ -176,43 +181,27 @@
             "visibleTestsPassed": 0,
             "gateFailures": 0,
             "openDiagnosticsCount": 0,
-            "acceptedWorkItems": 0,
+            "acceptedWorkItems": 1,
             "totalWorkItems": 1
           },
-          "diagnosis": "Objectives converged and integrated successfully.",
+          "diagnosis": "Objectives converged: 1 delivered work item(s) verified.",
           "consecutiveNoProgressRounds": 0,
           "totalRounds": 1,
           "graphRevision": 1
         }
       },
       {
-        "isError": false,
+        "isError": true,
         "data": {
-          "status": "succeeded",
-          "convergenceStatus": "succeeded",
-          "missionId": "unrelated-mission",
-          "readyNodes": [],
-          "progress": {
-            "hiddenTestsFailing": 0,
-            "hiddenTestsPassed": 0,
-            "visibleTestsFailing": 0,
-            "visibleTestsPassed": 0,
-            "gateFailures": 0,
-            "openDiagnosticsCount": 0,
-            "acceptedWorkItems": 1,
-            "totalWorkItems": 1
-          },
-          "diagnosis": "Objectives converged and integrated successfully.",
-          "consecutiveNoProgressRounds": 0,
-          "totalRounds": 1,
-          "graphRevision": 1
+          "status": "rejected",
+          "reason": "Mission 'unrelated-mission' does not own the workspace execution graph, which belongs to 'mission-a'. A verdict cannot be rendered for another mission's work."
         }
       }
     ],
     "foreignMissionStatus": {
       "exitCode": 0,
-      "status": "succeeded",
-      "missionId": "unrelated-mission",
+      "status": "in_progress",
+      "missionId": "unknown",
       "progress": {
         "hiddenTestsFailing": 0,
         "hiddenTestsPassed": 0,
@@ -235,25 +224,28 @@
           "missionId": "mission-a",
           "graphId": "graph-mission-a",
           "revision": 1,
+          "deliverableNodes": 1,
+          "requiresPlan": false,
           "paths": {
-            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\trust-0iGfCU\\.oma\\graph\\execution-graph.json",
-            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\trust-0iGfCU\\.oma\\graph\\events.jsonl",
-            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\trust-0iGfCU\\.oma\\graph\\head.json"
+            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\trust-hkg8Ro\\.oma\\graph\\execution-graph.json",
+            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\trust-hkg8Ro\\.oma\\graph\\events.jsonl",
+            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-hjQ2Ml\\trust-hkg8Ro\\.oma\\graph\\head.json"
           }
         }
       },
       {
         "isError": false,
         "data": {
-          "status": "succeeded",
-          "convergenceStatus": "succeeded",
+          "status": "in_progress",
+          "convergenceStatus": "in_progress",
           "missionId": "mission-a",
           "readyNodes": [
             {
               "id": "audit-task",
               "title": "Read-only audit task",
               "kind": "agent",
-              "state": "ready"
+              "state": "ready",
+              "synthetic": false
             }
           ],
           "progress": {
@@ -266,7 +258,7 @@
             "acceptedWorkItems": 0,
             "totalWorkItems": 1
           },
-          "diagnosis": "Objectives converged and integrated successfully.",
+          "diagnosis": "1 node(s) ready for execution.",
           "consecutiveNoProgressRounds": 0,
           "totalRounds": 1,
           "graphRevision": 1
@@ -278,11 +270,11 @@
         "isError": false,
         "data": {
           "status": "summarized",
-          "projectId": "e5cfe414-e09b-429f-893e-487ee25e65aa",
-          "sessionId": "4cb2cc41-f97a-4d52-9f3b-59f42d661feb",
+          "projectId": "ec226633-5dd3-4657-8aee-7f8f1253c81f",
+          "sessionId": "f7196b44-8cde-482d-920e-3cab6daf07aa",
           "interaction": {
-            "id": "d2ebae07-b04f-4121-9cce-6a29eb676e1b",
-            "sessionId": "4cb2cc41-f97a-4d52-9f3b-59f42d661feb",
+            "id": "6fa39c64-20dc-4225-9201-2198dc3e5e55",
+            "sessionId": "f7196b44-8cde-482d-920e-3cab6daf07aa",
             "roundNumber": 0,
             "context": "First synthetic exchange",
             "actions": "No model invoked",
@@ -290,7 +282,7 @@
             "actionsTaken": "No model invoked",
             "outcome": null,
             "nodeRef": null,
-            "createdAt": 1789121801286
+            "createdAt": 1789145727427
           }
         }
       },
@@ -298,11 +290,11 @@
         "isError": false,
         "data": {
           "status": "summarized",
-          "projectId": "e5cfe414-e09b-429f-893e-487ee25e65aa",
-          "sessionId": "1920bb42-9e37-4d18-a5ea-bc6985159ce6",
+          "projectId": "ec226633-5dd3-4657-8aee-7f8f1253c81f",
+          "sessionId": "6cebb8c1-f495-4bff-9b98-1f2fede8c03c",
           "interaction": {
-            "id": "71e90057-f691-45e7-91e1-2098e03cead3",
-            "sessionId": "1920bb42-9e37-4d18-a5ea-bc6985159ce6",
+            "id": "ad588555-6705-42de-9669-3e82f457feb8",
+            "sessionId": "6cebb8c1-f495-4bff-9b98-1f2fede8c03c",
             "roundNumber": 0,
             "context": "Second synthetic exchange",
             "actions": "No model invoked",
@@ -310,7 +302,7 @@
             "actionsTaken": "No model invoked",
             "outcome": null,
             "nodeRef": null,
-            "createdAt": 1789121801301
+            "createdAt": 1789145727440
           }
         }
       },
@@ -318,9 +310,30 @@
         "isError": false,
         "data": {
           "status": "queried",
-          "projectId": "e5cfe414-e09b-429f-893e-487ee25e65aa",
+          "projectId": "ec226633-5dd3-4657-8aee-7f8f1253c81f",
           "count": 0,
-          "entries": []
+          "entries": [],
+          "summaryCount": 2,
+          "summaries": [
+            {
+              "sessionId": "6cebb8c1-f495-4bff-9b98-1f2fede8c03c",
+              "roundNumber": 0,
+              "context": "Second synthetic exchange",
+              "actions": "No model invoked",
+              "outcome": null,
+              "nodeRef": null,
+              "createdAt": 1789145727440
+            },
+            {
+              "sessionId": "f7196b44-8cde-482d-920e-3cab6daf07aa",
+              "roundNumber": 0,
+              "context": "First synthetic exchange",
+              "actions": "No model invoked",
+              "outcome": null,
+              "nodeRef": null,
+              "createdAt": 1789145727427
+            }
+          ]
         }
       }
     ]

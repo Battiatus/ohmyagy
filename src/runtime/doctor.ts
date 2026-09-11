@@ -44,12 +44,42 @@ export interface DoctorReport {
     diagnostics: string[];
   };
   /**
+   * Which directory this instance believes it governs, and why. Reported because
+   * the wrong answer is otherwise silent, and it invalidates every other line of
+   * this report: a healthy broker pointed at the editor's own install tree
+   * attests to a workspace no user asked about.
+   */
+  workspace: WorkspaceReport;
+  /**
    * Layered attestation: installed != loaded != tested.
    * `pluginDiscovery.valid` above is a static file-existence check and stays for
    * backward compatibility; it says nothing about whether AGY accepted the hooks,
    * whether the MCP server answers, or which `oma` binary actually ran.
    */
   attestation: AttestationReport;
+}
+
+export interface WorkspaceReport {
+  /** Absolute path this instance treats as the workspace root. */
+  root: string;
+  /** How the root was chosen. Only the first two are explicit. */
+  source: "OMA_WORKSPACE_ROOT" | "argument" | "process.cwd";
+  /**
+   * Files that identify this root as an editor installation tree rather than a
+   * project. Deliberately not a "does this look like a project" check: a real
+   * workspace may carry no marker at all, so only an unambiguous install
+   * signature is treated as proof of the wrong target.
+   */
+  installTreeMarkers: string[];
+  /**
+   * True when nobody stated a workspace and the fallback landed on an editor
+   * installation tree. Measured 2026-09-11: AntiGravity spawns stdio MCP servers
+   * with cwd set to `%LOCALAPPDATA%\Programs\antigravity`, so
+   * `OMA_WORKSPACE_ROOT || process.cwd()` silently made the editor's own install
+   * directory the governed workspace. Callers must treat this as a failure, not a
+   * warning.
+   */
+  governsEditorInstall: boolean;
 }
 
 export interface HookFileAttestation {
@@ -310,9 +340,51 @@ export class OmaDoctor {
         declaredSkills: Array.from(new Set(declaredSkills)),
         diagnostics,
       },
+      workspace: describeWorkspace(workspaceRoot),
       attestation: buildAttestationReport(workspaceRoot),
     };
   }
+}
+
+const EDITOR_INSTALL_MARKERS = [
+  "Antigravity.exe",
+  join("resources", "app"),
+  "chrome_100_percent.pak",
+] as const;
+
+/**
+ * Describe the governed workspace without guessing whether it is legitimate.
+ * `OMA_WORKSPACE_ROOT` and an explicit argument are trustworthy statements of
+ * intent; `process.cwd()` is an assumption, and in this host that assumption
+ * resolves to the editor installation directory.
+ */
+export function describeWorkspace(workspaceRoot: string = process.cwd()): WorkspaceReport {
+  const root = resolve(workspaceRoot);
+  const envRoot = process.env.OMA_WORKSPACE_ROOT;
+  const statesRoot =
+    typeof envRoot === "string" && envRoot.length > 0 && samePath(resolve(envRoot), root);
+  const isFallback = samePath(root, resolve(process.cwd()));
+  const installTreeMarkers = EDITOR_INSTALL_MARKERS.filter((marker) =>
+    existsSync(join(root, marker)),
+  );
+  const source: WorkspaceReport["source"] = statesRoot
+    ? "OMA_WORKSPACE_ROOT"
+    : isFallback
+      ? "process.cwd"
+      : "argument";
+
+  return {
+    root,
+    source,
+    installTreeMarkers: [...installTreeMarkers],
+    governsEditorInstall: source === "process.cwd" && installTreeMarkers.length > 0,
+  };
+}
+
+function samePath(left: string, right: string): boolean {
+  const normalize = (value: string): string =>
+    process.platform === "win32" ? resolve(value).toLocaleLowerCase("en-US") : resolve(value);
+  return normalize(left) === normalize(right);
 }
 
 function isActualAgyExecutable(filePath: string): boolean {
