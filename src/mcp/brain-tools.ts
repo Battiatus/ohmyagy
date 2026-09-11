@@ -60,7 +60,7 @@ export const BRAIN_TOOL_DEFINITIONS = [
   {
     name: "brain_query",
     description:
-      "Retrieve memory entries for a project, optionally narrowed by dimension and a free-text keyword. Strictly scoped to one project. Read-only.",
+      "Recall a project's memory in one call: durable facts from `entries`/`count`, and the most recent condensed exchanges from `summaries`/`summaryCount`. A captured conversation is written to the second, so reading only the first reports zero while memory exists. Strictly scoped to one project. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -74,6 +74,11 @@ export const BRAIN_TOOL_DEFINITIONS = [
         },
         query: { type: "string" },
         limit: { type: "number", minimum: 1 },
+        includeSummaries: {
+          type: "boolean",
+          description:
+            "Include condensed interaction summaries. Defaults to true; set false for facts only.",
+        },
       },
     },
   },
@@ -249,18 +254,72 @@ function executeQuery(
     input.dimensions === undefined
       ? undefined
       : (asStringArray(input.dimensions) ?? []).map(asDimension);
+  const limit =
+    typeof input.limit === "number" && Number.isFinite(input.limit) && input.limit > 0
+      ? Math.floor(input.limit)
+      : 20;
   const entries = brain.queryMemory({
     projectId: project.id,
     dimensions,
     query: typeof input.query === "string" ? input.query : undefined,
     limit: typeof input.limit === "number" ? input.limit : undefined,
   });
+
+  // The Brain holds two distinct things: durable facts in `memory_entries` and
+  // condensed exchanges in `interaction_summaries`. Recall must return both.
+  // Reading only the former is why a captured conversation looked like a
+  // vanished one: the drain recorded it, and `brain_query` reported zero. That
+  // split is the "write and read disagree" defect of the 2026-09-10 audit.
+  const summaries =
+    input.includeSummaries === false ? [] : collectRecentSummaries(brain, project.id, limit);
+
   return {
     status: "queried",
     projectId: project.id,
     count: entries.length,
     entries,
+    summaryCount: summaries.length,
+    summaries,
   };
+}
+
+interface RecallSummary {
+  sessionId: string;
+  roundNumber: number;
+  context: string | null;
+  actions: string | null;
+  outcome: string | null;
+  nodeRef: string | null;
+  createdAt: number;
+}
+
+/** Most recent condensed exchanges across every session of a project. */
+function collectRecentSummaries(
+  brain: BrainStore,
+  projectId: string,
+  limit: number,
+): RecallSummary[] {
+  const collected: RecallSummary[] = [];
+  try {
+    for (const session of brain.listSessions(projectId)) {
+      for (const interaction of brain.listInteractions(session.id)) {
+        collected.push({
+          sessionId: interaction.sessionId,
+          roundNumber: interaction.roundNumber,
+          context: interaction.context ?? null,
+          actions: interaction.actions ?? null,
+          outcome: interaction.outcome ?? null,
+          nodeRef: interaction.nodeRef ?? null,
+          createdAt: interaction.createdAt,
+        });
+      }
+    }
+  } catch {
+    // Recall is best effort; a projection failure must not fail the read.
+    return [];
+  }
+  collected.sort((left, right) => right.createdAt - left.createdAt);
+  return collected.slice(0, limit);
 }
 
 function executeSummarize(
