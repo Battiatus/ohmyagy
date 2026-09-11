@@ -77,6 +77,14 @@ export interface McpProbeAttestation {
   protocolVersion?: string;
   toolCount?: number;
   missingTools: string[];
+  /**
+   * Problems in the JSON-RPC handshake itself. The broker used to answer
+   * `resources/list` with `id: null` and a parse-error code, which made AGY
+   * abandon the server so no OMA tool ever reached the session — while a naive
+   * `initialize` + `tools/list` probe still passed. The probe therefore replays
+   * the real client sequence.
+   */
+  handshakeProblems: string[];
   error?: string;
 }
 
@@ -334,6 +342,7 @@ interface JsonRpcLine {
     protocolVersion?: string;
     tools?: Array<{ name?: string }>;
   };
+  error?: { code?: number; message?: string };
 }
 
 /** Per-user AGY config root. AGY loads plugin hooks from here, not from a workspace copy. */
@@ -432,24 +441,33 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
     return {
       ok: false,
       missingTools: [...REQUIRED_MCP_TOOLS],
+      handshakeProblems: [],
       error: "broker-server build artifact not found; run the build before attesting.",
     };
   }
 
+  // Replay the sequence a real MCP client performs. `initialize` + `tools/list`
+  // alone is not enough: AGY also probes the resource and prompt surfaces during
+  // the handshake, and an invalid reply to any of them makes it abandon the
+  // server before a single tool is registered.
+  const probeRequests: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [
+    {
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "oma-doctor", version: "1.0.0" },
+      },
+    },
+    { id: 2, method: "tools/list" },
+    { id: 3, method: "ping" },
+    { id: 4, method: "resources/list" },
+    { id: 5, method: "prompts/list" },
+    { id: 6, method: "logging/setLevel", params: { level: "info" } },
+  ];
   const requests =
-    [
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo: { name: "oma-doctor", version: "1.0.0" },
-        },
-      }),
-      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
-    ].join("\n") + "\n";
+    probeRequests.map((probe) => JSON.stringify({ jsonrpc: "2.0", ...probe })).join("\n") + "\n";
 
   let stdout = "";
   let stderr = "";
@@ -468,6 +486,7 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
       ok: false,
       serverPath,
       missingTools: [...REQUIRED_MCP_TOOLS],
+      handshakeProblems: [],
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -475,6 +494,10 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
   let serverName: string | undefined;
   let protocolVersion: string | undefined;
   const toolNames: string[] = [];
+  const handshakeProblems: string[] = [];
+  const answered = new Set<number>();
+  let sawNullId = false;
+
   for (const line of stdout.split(/\r?\n/u)) {
     if (!line.trim()) continue;
     let message: JsonRpcLine;
@@ -483,15 +506,40 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
     } catch {
       continue;
     }
-    if (message.id === 1 && message.result) {
+    if (message.id === null || message.id === undefined) {
+      sawNullId = true;
+      continue;
+    }
+    const id = typeof message.id === "number" ? message.id : Number(message.id);
+    if (!Number.isFinite(id)) continue;
+    answered.add(id);
+
+    if (id === 1 && message.result) {
       serverName = message.result.serverInfo?.name;
       protocolVersion = message.result.protocolVersion;
     }
-    if (message.id === 2 && Array.isArray(message.result?.tools)) {
+    if (id === 2 && Array.isArray(message.result?.tools)) {
       for (const tool of message.result.tools) {
         if (typeof tool?.name === "string") toolNames.push(tool.name);
       }
     }
+    if (id !== 1 && id !== 2 && message.error) {
+      const probe = probeRequests.find((entry) => entry.id === id);
+      handshakeProblems.push(
+        `${probe?.method ?? `id ${id}`} was refused: ${message.error.message ?? "error"} (code ${message.error.code ?? "?"}). AGY abandons a server that refuses a handshake probe, so no tool would reach the session.`,
+      );
+    }
+  }
+
+  for (const probe of probeRequests) {
+    if (!answered.has(probe.id)) {
+      handshakeProblems.push(`${probe.method} got no response (id ${probe.id} unanswered).`);
+    }
+  }
+  if (sawNullId) {
+    handshakeProblems.push(
+      "a response carried id=null, which the client cannot match to its request; a real client treats that as a protocol violation and closes the connection.",
+    );
   }
 
   if (toolNames.length === 0) {
@@ -501,6 +549,7 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
       serverName,
       protocolVersion,
       missingTools: [...REQUIRED_MCP_TOOLS],
+      handshakeProblems,
       error:
         stderr.trim().slice(0, 400) ||
         "MCP handshake produced no tools/list response; the session would see zero OMA tools.",
@@ -509,12 +558,13 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
 
   const missingTools = REQUIRED_MCP_TOOLS.filter((tool) => !toolNames.includes(tool));
   return {
-    ok: missingTools.length === 0,
+    ok: missingTools.length === 0 && handshakeProblems.length === 0,
     serverPath,
     serverName,
     protocolVersion,
     toolCount: toolNames.length,
     missingTools,
+    handshakeProblems,
   };
 }
 
