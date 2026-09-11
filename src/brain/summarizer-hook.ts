@@ -65,8 +65,15 @@ function resolveSessionId(
 }
 
 function passthrough(): void {
-  // Neutral decision: allow the session to proceed/stop normally.
-  process.stdout.write(`${JSON.stringify({ continue: true })}\n`);
+  // Emit an empty object, NOT a Claude-style `{"continue":true}`.
+  //
+  // AGY unmarshals a hook's stdout with protojson against the result message of
+  // the event that fired, and an unknown field is a hard failure. Measured on
+  // AGY 1.2.1: a PostToolUse hook printing `{"decision":"allow",...}` surfaced to
+  // the agent as `Encountered error in tool execution: failed to unmarshal result
+  // from hook ... unknown field "decision"`. `{}` decodes into any message, so a
+  // best-effort memory hook can never damage the session it is observing.
+  process.stdout.write("{}\n");
 }
 
 async function main(): Promise<void> {
@@ -85,7 +92,12 @@ async function main(): Promise<void> {
       (typeof p.cwd === "string" && p.cwd) ||
       process.env.OMA_WORKSPACE_ROOT ||
       process.cwd();
+    // AGY names the host session `conversationId`; `session_id`/`sessionId` are
+    // the Claude and Gemini spellings. Reading only the latter meant the lookup
+    // never matched and every host session collapsed onto the single "default"
+    // Brain session, defeating the per-session scoping the vision asks for.
     const hostSessionId =
+      (typeof p.conversationId === "string" && p.conversationId) ||
       (typeof p.session_id === "string" && p.session_id) ||
       (typeof p.sessionId === "string" && p.sessionId) ||
       "";
