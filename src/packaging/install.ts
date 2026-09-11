@@ -123,6 +123,15 @@ export function installWorkspacePlugin(
     writeFileSync(
       join(stagingDir, "rules", "oma-strict.md"),
       [
+        // The host rule loader rejects a rule file that has no frontmatter:
+        // `plugins.go:153 Failed to parse plugin rule file ...: invalid frontmatter
+        // format`, logged on every AntiGravity IDE start (measured 2026-09-11).
+        // The shape mirrors the rule files the host itself ships under
+        // ~/.gemini/.agent/rules/<lang>/<rule>.md.
+        "---",
+        "paths:",
+        '  - "**/*"',
+        "---",
         "# OMA Strict Workflow Rules",
         "",
         "1. All workspace mutations must occur within authorized OMA worktrees (.oma/worktrees/).",
