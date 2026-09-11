@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildOmaHooks } from "./hook-contract.js";
 
 export interface WorkspacePluginInstall {
   pluginDir: string;
@@ -84,38 +85,18 @@ export function installWorkspacePlugin(
       description: "Oh My Antigravity: Multi-agent orchestration, dynamic workflows and graph engineering.",
     });
 
-    writeJson(join(stagingDir, "hooks.json"), {
-      "oma-strict-write-gate": {
-        enabled: true,
-        PreToolUse: [
-          {
-            matcher: "*",
-            hooks: [
-              {
-                type: "command",
-                command: hookCommand,
-                timeout: 10,
-              },
-            ],
-          },
-        ],
-      },
-      "oma-memory-summarizer": {
-        enabled: true,
-        Stop: [
-          {
-            matcher: "*",
-            hooks: [
-              {
-                type: "command",
-                command: summarizerHookCommand,
-                timeout: 30,
-              },
-            ],
-          },
-        ],
-      },
-    });
+    // Hook shape is enforced by the empirically captured AGY contract. Never
+    // hand-write this object: the runtime decodes hooks.json as a map of hook
+    // NAME -> spec, and one unsupported event name makes it discard the WHOLE
+    // file. That is how an unsupported `Stop` event silently disabled the strict
+    // write gate along with the memory summarizer.
+    writeJson(
+      join(stagingDir, "hooks.json"),
+      buildOmaHooks({
+        writeGateCommand: hookCommand,
+        memoryCommand: summarizerHookCommand,
+      }),
+    );
 
     writeJson(join(stagingDir, "gates.json"), { schemaVersion: 1, gates });
     const mcpCommand = mcpServerPath.endsWith(".ts")
