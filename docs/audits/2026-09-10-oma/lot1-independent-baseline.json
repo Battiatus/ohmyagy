@@ -1,0 +1,63 @@
+{
+  "repo": "C:\\Users\\User\\Documents\\Repos\\plugins\\ohmyagy",
+  "fixtureRoot": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-lot1-independent-o7VPQQ",
+  "results": [
+    {
+      "name": "bootstrap is not business success",
+      "passed": false,
+      "error": "Expected \"actual\" to be strictly unequal to:\n\n'succeeded'"
+    },
+    {
+      "name": "caller cannot force success with ready work",
+      "passed": false,
+      "error": "Expected \"actual\" to be strictly unequal to:\n\n'succeeded'"
+    },
+    {
+      "name": "current counts and valid completion survive process restart",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n0 !== 1\n"
+    },
+    {
+      "name": "bootstrap still permits genuine planning and completion",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n2 !== 1\n"
+    },
+    {
+      "name": "graph_apply top-level: reject before graph mutation",
+      "passed": false,
+      "error": "Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    '/graph/events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',\n    '/graph/execution-graph.json': '741a9a59310cb93aec084e4fadf28b274801bcf2d8f927f944a69bd872d3dfb3',\n    '/graph/head.json': '2e22a9dfc22f3ca3764ba9a6dfe6b58218b9abe290ca76d5259b653fec415a1c',\n    '/graph/session-mission-id': '3757d6445c7f6cbc3545cc93b294cea0eb8dd5cb7d870ee610766e1853139a1c',\n+   '/ledger/events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',\n    '/missions/mission-a/events.jsonl': 'edbcb6e40267fc908a42154c82748055c1a4bf335bcb021d004c0ab73d051f27'\n  }\n"
+    },
+    {
+      "name": "graph_apply nested: reject before graph mutation",
+      "passed": false,
+      "error": "Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    '/graph/events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',\n    '/graph/execution-graph.json': '741a9a59310cb93aec084e4fadf28b274801bcf2d8f927f944a69bd872d3dfb3',\n    '/graph/head.json': '2e22a9dfc22f3ca3764ba9a6dfe6b58218b9abe290ca76d5259b653fec415a1c',\n    '/graph/session-mission-id': '3757d6445c7f6cbc3545cc93b294cea0eb8dd5cb7d870ee610766e1853139a1c',\n+   '/ledger/events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',\n    '/missions/mission-a/events.jsonl': '3acaf2b9dfc4d8657969d7f28d1a6f3074f02a1eafa418778cb6578040410751'\n  }\n"
+    },
+    {
+      "name": "graph_apply conflicting nested: reject before graph mutation",
+      "passed": false,
+      "error": "Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    '/graph/events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',\n    '/graph/execution-graph.json': '741a9a59310cb93aec084e4fadf28b274801bcf2d8f927f944a69bd872d3dfb3',\n    '/graph/head.json': '2e22a9dfc22f3ca3764ba9a6dfe6b58218b9abe290ca76d5259b653fec415a1c',\n    '/graph/session-mission-id': '3757d6445c7f6cbc3545cc93b294cea0eb8dd5cb7d870ee610766e1853139a1c',\n+   '/ledger/events.jsonl': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',\n    '/missions/mission-a/events.jsonl': 'fe14cbd89eb300d0bb9f7d27c1201a44e7c02868da00d387ee0ac8c348d7a0dd'\n  }\n"
+    },
+    {
+      "name": "converge_step: foreign mission rejected without any persistence",
+      "passed": false,
+      "error": "{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"in_progress\\\",\\\"convergenceStatus\\\":\\\"in_progress\\\",\\\"missionId\\\":\\\"foreign-mission\\\",\\\"readyNodes\\\":[{\\\"id\\\":\\\"task\\\",\\\"title\\\":\\\"Synthetic acceptance task\\\",\\\"kind\\\":\\\"agent\\\",\\\"state\\\":\\\"ready\\\"}],\\\"progress\\\":{\\\"hiddenTestsFailing\\\":0,\\\"hiddenTestsPassed\\\":0,\\\"visibleTestsFailing\\\":0,\\\"visibleTestsPassed\\\":0,\\\"gateFailures\\\":0,\\\"openDiagnosticsCount\\\":0,\\\"acceptedWorkItems\\\":0,\\\"totalWorkItems\\\":1},\\\"diagnosis\\\":\\\"1 node(s) ready for execution.\\\",\\\"consecutiveNoProgressRounds\\\":0,\\\"totalRounds\\\":1,\\\"graphRevision\\\":1}\"}],\"structuredContent\":{\"status\":\"in_progress\",\"convergenceStatus\":\"in_progress\",\"missionId\":\"foreign-mission\",\"readyNodes\":[{\"id\":\"task\",\"title\":\"Synthetic acceptance task\",\"kind\":\"agent\",\"state\":\"ready\"}],\"progress\":{\"hiddenTestsFailing\":0,\"hiddenTestsPassed\":0,\"visibleTestsFailing\":0,\"visibleTestsPassed\":0,\"gateFailures\":0,\"openDiagnosticsCount\":0,\"acceptedWorkItems\":0,\"totalWorkItems\":1},\"diagnosis\":\"1 node(s) ready for execution.\",\"consecutiveNoProgressRounds\":0,\"totalRounds\":1,\"graphRevision\":1},\"isError\":false}\n\nfalse !== true\n"
+    },
+    {
+      "name": "graph_mark_node: foreign mission rejected without any persistence",
+      "passed": false,
+      "error": "{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"node_marked\\\",\\\"nodeId\\\":\\\"task\\\",\\\"state\\\":\\\"running\\\",\\\"dispatchId\\\":\\\"dispatch-task-1789113258560\\\",\\\"event\\\":{\\\"sequence\\\":1,\\\"timestamp\\\":\\\"2026-09-11T07:54:18.566Z\\\",\\\"graphId\\\":\\\"graph-mission-a\\\",\\\"graphRevision\\\":1,\\\"graphHash\\\":\\\"bd69f6f251a7db11dcad97eda81831919129546c3df07bdb5283730e67d33c7a\\\",\\\"nodeId\\\":\\\"task\\\",\\\"dispatchId\\\":\\\"dispatch-task-1789113258560\\\",\\\"authority\\\":\\\"scheduler\\\",\\\"authorityId\\\":\\\"oma-scheduler\\\",\\\"previousHash\\\":\\\"0000000000000000000000000000000000000000000000000000000000000000\\\",\\\"eventHash\\\":\\\"f08a8b724c2179888270b2942a43963b181fc0be9ac11fff05eee070216c1a5d\\\",\\\"eventType\\\":\\\"node_dispatched\\\"},\\\"readySet\\\":[]}\"}],\"structuredContent\":{\"status\":\"node_marked\",\"nodeId\":\"task\",\"state\":\"running\",\"dispatchId\":\"dispatch-task-1789113258560\",\"event\":{\"sequence\":1,\"timestamp\":\"2026-09-11T07:54:18.566Z\",\"graphId\":\"graph-mission-a\",\"graphRevision\":1,\"graphHash\":\"bd69f6f251a7db11dcad97eda81831919129546c3df07bdb5283730e67d33c7a\",\"nodeId\":\"task\",\"dispatchId\":\"dispatch-task-1789113258560\",\"authority\":\"scheduler\",\"authorityId\":\"oma-scheduler\",\"previousHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"eventHash\":\"f08a8b724c2179888270b2942a43963b181fc0be9ac11fff05eee070216c1a5d\",\"eventType\":\"node_dispatched\"},\"readySet\":[]},\"isError\":false}\n\nfalse !== true\n"
+    },
+    {
+      "name": "graph_replan: foreign mission rejected without any persistence",
+      "passed": false,
+      "error": "{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"replanned\\\",\\\"proposalId\\\":\\\"prop_f3c16454d7b1236352a15d5e\\\",\\\"appliedRevision\\\":2,\\\"role\\\":\\\"explorer\\\",\\\"newNodeId\\\":\\\"task-diag-w2\\\",\\\"failedNodeId\\\":\\\"task\\\",\\\"readyNodes\\\":[\\\"task\\\"],\\\"isReady\\\":false,\\\"diagnosis\\\":\\\"synthetic\\\"}\"}],\"structuredContent\":{\"status\":\"replanned\",\"proposalId\":\"prop_f3c16454d7b1236352a15d5e\",\"appliedRevision\":2,\"role\":\"explorer\",\"newNodeId\":\"task-diag-w2\",\"failedNodeId\":\"task\",\"readyNodes\":[\"task\"],\"isReady\":false,\"diagnosis\":\"synthetic\"},\"isError\":false}\n\nfalse !== true\n"
+    },
+    {
+      "name": "converge_status: foreign mission rejected without any persistence",
+      "passed": false,
+      "error": "{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"status\\\",\\\"convergenceStatus\\\":\\\"in_progress\\\",\\\"missionId\\\":\\\"foreign-mission\\\",\\\"graphId\\\":\\\"graph-mission-a\\\",\\\"revision\\\":1,\\\"readyNodes\\\":[{\\\"id\\\":\\\"task\\\",\\\"title\\\":\\\"Synthetic acceptance task\\\",\\\"kind\\\":\\\"agent\\\",\\\"state\\\":\\\"ready\\\"}],\\\"progress\\\":{\\\"hiddenTestsFailing\\\":0,\\\"hiddenTestsPassed\\\":0,\\\"visibleTestsFailing\\\":0,\\\"visibleTestsPassed\\\":0,\\\"gateFailures\\\":0,\\\"openDiagnosticsCount\\\":0,\\\"acceptedWorkItems\\\":0,\\\"totalWorkItems\\\":1},\\\"consecutiveNoProgressRounds\\\":0,\\\"totalRounds\\\":1,\\\"nodeCounts\\\":{\\\"total\\\":1,\\\"ready\\\":1,\\\"running\\\":0,\\\"succeeded\\\":0,\\\"failed\\\":0},\\\"diagnosis\\\":\\\"1 node(s) ready for execution.\\\"}\"}],\"structuredContent\":{\"status\":\"status\",\"convergenceStatus\":\"in_progress\",\"missionId\":\"foreign-mission\",\"graphId\":\"graph-mission-a\",\"revision\":1,\"readyNodes\":[{\"id\":\"task\",\"title\":\"Synthetic acceptance task\",\"kind\":\"agent\",\"state\":\"ready\"}],\"progress\":{\"hiddenTestsFailing\":0,\"hiddenTestsPassed\":0,\"visibleTestsFailing\":0,\"visibleTestsPassed\":0,\"gateFailures\":0,\"openDiagnosticsCount\":0,\"acceptedWorkItems\":0,\"totalWorkItems\":1},\"consecutiveNoProgressRounds\":0,\"totalRounds\":1,\"nodeCounts\":{\"total\":1,\"ready\":1,\"running\":0,\"succeeded\":0,\"failed\":0},\"diagnosis\":\"1 node(s) ready for execution.\"},\"isError\":false}\n\nfalse !== true\n"
+    }
+  ],
+  "passed": 0,
+  "failed": 11
+}

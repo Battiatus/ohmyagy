@@ -1,0 +1,590 @@
+{
+  "fixtureRoot": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw",
+  "probes": {
+    "bootstrap": [
+      {
+        "isError": false,
+        "data": {
+          "status": "initialized",
+          "missionId": "mission-a",
+          "graphId": "graph-mission-a",
+          "revision": 1,
+          "paths": {
+            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\bootstrap-OGKDlj\\.oma\\graph\\execution-graph.json",
+            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\bootstrap-OGKDlj\\.oma\\graph\\events.jsonl",
+            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\bootstrap-OGKDlj\\.oma\\graph\\head.json"
+          }
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "succeeded",
+          "convergenceStatus": "succeeded",
+          "missionId": "mission-a",
+          "readyNodes": [],
+          "progress": {
+            "hiddenTestsFailing": 0,
+            "hiddenTestsPassed": 0,
+            "visibleTestsFailing": 0,
+            "visibleTestsPassed": 0,
+            "gateFailures": 0,
+            "openDiagnosticsCount": 0,
+            "acceptedWorkItems": 1,
+            "totalWorkItems": 1
+          },
+          "diagnosis": "Objectives converged and integrated successfully.",
+          "consecutiveNoProgressRounds": 0,
+          "totalRounds": 1,
+          "graphRevision": 1
+        }
+      },
+      {
+        "isError": true,
+        "data": {
+          "status": "rejected",
+          "reason": "Graph event store is already initialized"
+        }
+      }
+    ],
+    "bootstrapStatus": {
+      "exitCode": 0,
+      "status": "succeeded",
+      "missionId": "mission-a",
+      "progress": {
+        "hiddenTestsFailing": 0,
+        "hiddenTestsPassed": 0,
+        "visibleTestsFailing": 0,
+        "visibleTestsPassed": 0,
+        "gateFailures": 0,
+        "openDiagnosticsCount": 0,
+        "acceptedWorkItems": 1,
+        "totalWorkItems": 1
+      },
+      "workItemIds": [
+        "bootstrap"
+      ],
+      "artifactCount": 0,
+      "stderr": ""
+    },
+    "progress": [
+      {
+        "isError": false,
+        "data": {
+          "status": "initialized",
+          "missionId": "mission-a",
+          "graphId": "graph-mission-a",
+          "revision": 1,
+          "paths": {
+            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\progress-rhde8r\\.oma\\graph\\execution-graph.json",
+            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\progress-rhde8r\\.oma\\graph\\events.jsonl",
+            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\progress-rhde8r\\.oma\\graph\\head.json"
+          }
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "in_progress",
+          "convergenceStatus": "in_progress",
+          "missionId": "mission-a",
+          "readyNodes": [
+            {
+              "id": "audit-task",
+              "title": "Read-only audit task",
+              "kind": "agent",
+              "state": "ready"
+            }
+          ],
+          "progress": {
+            "hiddenTestsFailing": 0,
+            "hiddenTestsPassed": 0,
+            "visibleTestsFailing": 0,
+            "visibleTestsPassed": 0,
+            "gateFailures": 0,
+            "openDiagnosticsCount": 0,
+            "acceptedWorkItems": 0,
+            "totalWorkItems": 1
+          },
+          "diagnosis": "1 node(s) ready for execution.",
+          "consecutiveNoProgressRounds": 0,
+          "totalRounds": 1,
+          "graphRevision": 1
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "node_marked",
+          "nodeId": "audit-task",
+          "state": "running",
+          "dispatchId": "audit-dispatch",
+          "event": {
+            "sequence": 1,
+            "timestamp": "2026-09-11T10:16:40.609Z",
+            "graphId": "graph-mission-a",
+            "graphRevision": 1,
+            "graphHash": "028d5936e5906cd667d9d27beb66052bcb0eb0a5e0f44c186da8337d24985ccf",
+            "nodeId": "audit-task",
+            "dispatchId": "audit-dispatch",
+            "authority": "scheduler",
+            "authorityId": "oma-scheduler",
+            "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "eventHash": "84cf4d0b6a2cbec9b46de9bf8e8b0689d66e394dcf5a6c242a281d61bfecf3ca",
+            "eventType": "node_dispatched"
+          },
+          "readySet": []
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "node_marked",
+          "nodeId": "audit-task",
+          "state": "succeeded",
+          "dispatchId": "audit-dispatch",
+          "event": {
+            "sequence": 2,
+            "timestamp": "2026-09-11T10:16:40.614Z",
+            "graphId": "graph-mission-a",
+            "graphRevision": 1,
+            "graphHash": "028d5936e5906cd667d9d27beb66052bcb0eb0a5e0f44c186da8337d24985ccf",
+            "nodeId": "audit-task",
+            "dispatchId": "audit-dispatch",
+            "authority": "broker",
+            "authorityId": "oma-broker",
+            "previousHash": "84cf4d0b6a2cbec9b46de9bf8e8b0689d66e394dcf5a6c242a281d61bfecf3ca",
+            "eventHash": "59ea3502e672176b02d27181e5293dccb1472d0a8a0c24b018d520321843a4cc",
+            "eventType": "node_completed",
+            "outcome": "success",
+            "evidenceHash": "a3716af21593e44e3c1ca05c5a540b768777ca26fdf1b9e9931e5aa9fde326d9"
+          },
+          "readySet": []
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "succeeded",
+          "convergenceStatus": "succeeded",
+          "missionId": "mission-a",
+          "readyNodes": [],
+          "progress": {
+            "hiddenTestsFailing": 0,
+            "hiddenTestsPassed": 0,
+            "visibleTestsFailing": 0,
+            "visibleTestsPassed": 0,
+            "gateFailures": 0,
+            "openDiagnosticsCount": 0,
+            "acceptedWorkItems": 0,
+            "totalWorkItems": 1
+          },
+          "diagnosis": "Objectives converged and integrated successfully.",
+          "consecutiveNoProgressRounds": 0,
+          "totalRounds": 1,
+          "graphRevision": 1
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "succeeded",
+          "convergenceStatus": "succeeded",
+          "missionId": "unrelated-mission",
+          "readyNodes": [],
+          "progress": {
+            "hiddenTestsFailing": 0,
+            "hiddenTestsPassed": 0,
+            "visibleTestsFailing": 0,
+            "visibleTestsPassed": 0,
+            "gateFailures": 0,
+            "openDiagnosticsCount": 0,
+            "acceptedWorkItems": 1,
+            "totalWorkItems": 1
+          },
+          "diagnosis": "Objectives converged and integrated successfully.",
+          "consecutiveNoProgressRounds": 0,
+          "totalRounds": 1,
+          "graphRevision": 1
+        }
+      }
+    ],
+    "foreignMissionStatus": {
+      "exitCode": 0,
+      "status": "succeeded",
+      "missionId": "unrelated-mission",
+      "progress": {
+        "hiddenTestsFailing": 0,
+        "hiddenTestsPassed": 0,
+        "visibleTestsFailing": 0,
+        "visibleTestsPassed": 0,
+        "gateFailures": 0,
+        "openDiagnosticsCount": 0,
+        "acceptedWorkItems": 0,
+        "totalWorkItems": 0
+      },
+      "workItemIds": [],
+      "artifactCount": 0,
+      "stderr": ""
+    },
+    "trustedCompletion": [
+      {
+        "isError": false,
+        "data": {
+          "status": "initialized",
+          "missionId": "mission-a",
+          "graphId": "graph-mission-a",
+          "revision": 1,
+          "paths": {
+            "definition": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\trust-0iGfCU\\.oma\\graph\\execution-graph.json",
+            "events": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\trust-0iGfCU\\.oma\\graph\\events.jsonl",
+            "head": "C:\\Users\\User\\AppData\\Local\\Temp\\oma-audit-20260910-HR2hTw\\trust-0iGfCU\\.oma\\graph\\head.json"
+          }
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "succeeded",
+          "convergenceStatus": "succeeded",
+          "missionId": "mission-a",
+          "readyNodes": [
+            {
+              "id": "audit-task",
+              "title": "Read-only audit task",
+              "kind": "agent",
+              "state": "ready"
+            }
+          ],
+          "progress": {
+            "hiddenTestsFailing": 0,
+            "hiddenTestsPassed": 0,
+            "visibleTestsFailing": 0,
+            "visibleTestsPassed": 0,
+            "gateFailures": 0,
+            "openDiagnosticsCount": 0,
+            "acceptedWorkItems": 0,
+            "totalWorkItems": 1
+          },
+          "diagnosis": "Objectives converged and integrated successfully.",
+          "consecutiveNoProgressRounds": 0,
+          "totalRounds": 1,
+          "graphRevision": 1
+        }
+      }
+    ],
+    "memory": [
+      {
+        "isError": false,
+        "data": {
+          "status": "summarized",
+          "projectId": "e5cfe414-e09b-429f-893e-487ee25e65aa",
+          "sessionId": "4cb2cc41-f97a-4d52-9f3b-59f42d661feb",
+          "interaction": {
+            "id": "d2ebae07-b04f-4121-9cce-6a29eb676e1b",
+            "sessionId": "4cb2cc41-f97a-4d52-9f3b-59f42d661feb",
+            "roundNumber": 0,
+            "context": "First synthetic exchange",
+            "actions": "No model invoked",
+            "userIntent": "First synthetic exchange",
+            "actionsTaken": "No model invoked",
+            "outcome": null,
+            "nodeRef": null,
+            "createdAt": 1789121801286
+          }
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "summarized",
+          "projectId": "e5cfe414-e09b-429f-893e-487ee25e65aa",
+          "sessionId": "1920bb42-9e37-4d18-a5ea-bc6985159ce6",
+          "interaction": {
+            "id": "71e90057-f691-45e7-91e1-2098e03cead3",
+            "sessionId": "1920bb42-9e37-4d18-a5ea-bc6985159ce6",
+            "roundNumber": 0,
+            "context": "Second synthetic exchange",
+            "actions": "No model invoked",
+            "userIntent": "Second synthetic exchange",
+            "actionsTaken": "No model invoked",
+            "outcome": null,
+            "nodeRef": null,
+            "createdAt": 1789121801301
+          }
+        }
+      },
+      {
+        "isError": false,
+        "data": {
+          "status": "queried",
+          "projectId": "e5cfe414-e09b-429f-893e-487ee25e65aa",
+          "count": 0,
+          "entries": []
+        }
+      }
+    ]
+  },
+  "incident": {
+    "path": "C:/Users/User/.gemini/antigravity-cli/conversations/d9cef86b-978c-43d8-889b-cb84720df89a.db",
+    "steps": 126,
+    "recognizedCalls": [
+      {
+        "step": 2,
+        "tool": "ask_question"
+      },
+      {
+        "step": 4,
+        "tool": "list_dir"
+      },
+      {
+        "step": 6,
+        "tool": "view_file"
+      },
+      {
+        "step": 8,
+        "tool": "list_dir"
+      },
+      {
+        "step": 10,
+        "tool": "list_dir"
+      },
+      {
+        "step": 12,
+        "tool": "list_dir"
+      },
+      {
+        "step": 14,
+        "tool": "view_file"
+      },
+      {
+        "step": 16,
+        "tool": "list_dir"
+      },
+      {
+        "step": 18,
+        "tool": "list_dir"
+      },
+      {
+        "step": 20,
+        "tool": "view_file"
+      },
+      {
+        "step": 22,
+        "tool": "find_by_name"
+      },
+      {
+        "step": 24,
+        "tool": "find_by_name"
+      },
+      {
+        "step": 26,
+        "tool": "view_file"
+      },
+      {
+        "step": 28,
+        "tool": "list_dir"
+      },
+      {
+        "step": 30,
+        "tool": "list_dir"
+      },
+      {
+        "step": 32,
+        "tool": "grep_search"
+      },
+      {
+        "step": 34,
+        "tool": "list_dir"
+      },
+      {
+        "step": 36,
+        "tool": "list_dir"
+      },
+      {
+        "step": 38,
+        "tool": "grep_search"
+      },
+      {
+        "step": 40,
+        "tool": "grep_search"
+      },
+      {
+        "step": 42,
+        "tool": "view_file"
+      },
+      {
+        "step": 44,
+        "tool": "grep_search"
+      },
+      {
+        "step": 46,
+        "tool": "view_file"
+      },
+      {
+        "step": 48,
+        "tool": "view_file"
+      },
+      {
+        "step": 50,
+        "tool": "view_file"
+      },
+      {
+        "step": 52,
+        "tool": "view_file"
+      },
+      {
+        "step": 54,
+        "tool": "view_file"
+      },
+      {
+        "step": 56,
+        "tool": "view_file"
+      },
+      {
+        "step": 58,
+        "tool": "view_file"
+      },
+      {
+        "step": 60,
+        "tool": "view_file"
+      },
+      {
+        "step": 62,
+        "tool": "view_file"
+      },
+      {
+        "step": 64,
+        "tool": "view_file"
+      },
+      {
+        "step": 66,
+        "tool": "view_file"
+      },
+      {
+        "step": 68,
+        "tool": "grep_search"
+      },
+      {
+        "step": 70,
+        "tool": "view_file"
+      },
+      {
+        "step": 72,
+        "tool": "grep_search"
+      },
+      {
+        "step": 74,
+        "tool": "view_file"
+      },
+      {
+        "step": 76,
+        "tool": "grep_search"
+      },
+      {
+        "step": 78,
+        "tool": "view_file"
+      },
+      {
+        "step": 80,
+        "tool": "grep_search"
+      },
+      {
+        "step": 82,
+        "tool": "view_file"
+      },
+      {
+        "step": 84,
+        "tool": "view_file"
+      },
+      {
+        "step": 86,
+        "tool": "grep_search"
+      },
+      {
+        "step": 88,
+        "tool": "view_file"
+      },
+      {
+        "step": 90,
+        "tool": "grep_search"
+      },
+      {
+        "step": 92,
+        "tool": "view_file"
+      },
+      {
+        "step": 94,
+        "tool": "list_dir"
+      },
+      {
+        "step": 96,
+        "tool": "list_dir"
+      },
+      {
+        "step": 98,
+        "tool": "view_file"
+      },
+      {
+        "step": 100,
+        "tool": "grep_search"
+      },
+      {
+        "step": 102,
+        "tool": "grep_search"
+      },
+      {
+        "step": 104,
+        "tool": "view_file"
+      },
+      {
+        "step": 106,
+        "tool": "grep_search"
+      },
+      {
+        "step": 108,
+        "tool": "grep_search"
+      },
+      {
+        "step": 110,
+        "tool": "view_file"
+      },
+      {
+        "step": 112,
+        "tool": "grep_search"
+      },
+      {
+        "step": 114,
+        "tool": "view_file"
+      },
+      {
+        "step": 116,
+        "tool": "view_file"
+      },
+      {
+        "step": 118,
+        "tool": "view_file"
+      },
+      {
+        "step": 120,
+        "tool": "view_file"
+      },
+      {
+        "step": 122,
+        "tool": "list_dir"
+      },
+      {
+        "step": 124,
+        "tool": "write_to_file"
+      }
+    ],
+    "toolCounts": {
+      "ask_question": 1,
+      "list_dir": 13,
+      "view_file": 30,
+      "find_by_name": 2,
+      "grep_search": 15,
+      "write_to_file": 1
+    }
+  }
+}

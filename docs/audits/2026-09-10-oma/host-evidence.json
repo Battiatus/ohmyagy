@@ -1,0 +1,228 @@
+{
+  "checkedAt": "2026-09-10T16:22:26.613Z",
+  "symapOmaExists": false,
+  "configs": [
+    {
+      "path": "C:/Users/User/Documents/Repos/Symap/.agents/mcp_config.json",
+      "mtime": "2026-09-10T09:12:27.583Z",
+      "omaServers": [
+        [
+          "oma-broker",
+          {
+            "command": "node",
+            "args": [
+              "C:\\Users\\User\\Documents\\Repos\\plugins\\ohmyagy\\dist\\src\\mcp\\broker-server.js"
+            ],
+            "cwd": "C:\\Users\\User\\documents\\Repos\\symap",
+            "env": {
+              "OMA_WORKSPACE_ROOT": "C:\\Users\\User\\documents\\Repos\\symap"
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "path": "C:/Users/User/Documents/Repos/Symap/.agents/plugins/oma/mcp_config.json",
+      "mtime": "2026-09-10T08:33:05.569Z",
+      "omaServers": [
+        [
+          "oma-broker",
+          {
+            "command": "node",
+            "args": [
+              "C:\\Users\\User\\documents\\Repos\\plugins\\ohmyagy\\dist\\src\\mcp\\broker-server.js"
+            ],
+            "cwd": "C:\\Users\\User\\documents\\Repos\\symap",
+            "env": {
+              "OMA_WORKSPACE_ROOT": "C:\\Users\\User\\documents\\Repos\\symap",
+              "OMA_GATES_PATH": "C:\\Users\\User\\documents\\Repos\\symap\\.agents\\plugins\\oma\\gates.json"
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "path": "C:/Users/User/.gemini/config/plugins/oma/mcp_config.json",
+      "mtime": "2026-09-10T08:33:05.323Z",
+      "omaServers": [
+        [
+          "oma-broker",
+          {
+            "command": "node",
+            "args": [
+              "C:\\Users\\User\\documents\\Repos\\plugins\\ohmyagy\\dist\\src\\mcp\\broker-server.js"
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "path": "C:/Users/User/.gemini/antigravity/mcp_config.json",
+      "mtime": "2026-06-30T10:08:59.153Z",
+      "omaServers": []
+    }
+  ],
+  "logs": [
+    {
+      "path": "C:/Users/User/.gemini/antigravity-cli/log/cli-20260910_110833.log",
+      "lines": [
+        {
+          "line": 138,
+          "text": "I0910 11:08:40.607486     923 input_loop.go:94] HandleUserInput called with text: \"/oma-start  \\\"Audit complet de la solution, synchronisation des bases de données et dette technique\\\"\""
+        },
+        {
+          "line": 163,
+          "text": "W0910 11:08:41.155361    1218 hooks.go:87] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 182,
+          "text": "I0910 11:08:56.156439    1135 conversation_manager.go:980] Surfacing ask_question at step 2"
+        },
+        {
+          "line": 183,
+          "text": "I0910 11:09:35.698908    2694 server.go:2441] AskQuestion response for conversation d9cef86b-978c-43d8-889b-cb84720df89a step 2 (3 responses)"
+        }
+      ]
+    },
+    {
+      "path": "C:/Users/User/AppData/Roaming/Antigravity/logs/language_server.log",
+      "lines": [
+        {
+          "line": 511,
+          "text": "ERROR: logging before google.Init: W0910 14:10:28.989230    5584 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 550,
+          "text": "ERROR: logging before google.Init: W0910 14:11:04.938872    7563 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 587,
+          "text": "ERROR: logging before google.Init: W0910 14:12:28.800510   16934 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 639,
+          "text": "ERROR: logging before google.Init: W0910 14:13:23.087805   27124 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 675,
+          "text": "ERROR: logging before google.Init: W0910 14:15:15.136130   29746 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 723,
+          "text": "ERROR: logging before google.Init: W0910 14:15:27.163247   30804 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 773,
+          "text": "ERROR: logging before google.Init: W0910 14:15:39.984673   32104 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 2182,
+          "text": "ERROR: logging before google.Init: W0910 14:40:43.905463  187262 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 2232,
+          "text": "ERROR: logging before google.Init: W0910 14:41:17.182429  189817 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 2282,
+          "text": "ERROR: logging before google.Init: W0910 14:41:32.551746  190904 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 2755,
+          "text": "ERROR: logging before google.Init: W0910 14:54:59.843354  263320 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        },
+        {
+          "line": 2801,
+          "text": "ERROR: logging before google.Init: W0910 14:55:21.204612  264596 hooks.go:73] Failed to parse hooks for plugin oma: invalid hook \"oma-memory-summarizer\": command hook must specify 'command'"
+        }
+      ]
+    }
+  ],
+  "doctor": {
+    "exitCode": 0,
+    "result": {
+      "timestamp": "2026-09-10T16:22:27.248Z",
+      "os": "win32 x64",
+      "architecture": "x64",
+      "agyCli": {
+        "available": true,
+        "supportedFlags": [
+          "--agent",
+          "-p",
+          "--output-format",
+          "--effort",
+          "--add-dir",
+          "--print-timeout",
+          "--model",
+          "--mode"
+        ],
+        "diagnostics": [],
+        "path": "C:\\Users\\User\\AppData\\Local\\agy\\bin\\agy.exe",
+        "version": "1.2.0"
+      },
+      "bunCli": {
+        "available": true,
+        "path": "bun",
+        "version": "1.3.14"
+      },
+      "gitCli": {
+        "available": true,
+        "path": "git",
+        "version": "git version 2.54.0.windows.1"
+      },
+      "nodeCli": {
+        "available": true,
+        "path": "C:\\nvm4w\\nodejs\\node.exe",
+        "version": "v24.16.0"
+      },
+      "pluginDiscovery": {
+        "installed": true,
+        "pluginPath": "C:\\Users\\User\\Documents\\Repos\\Symap\\.agents\\plugins\\oma",
+        "valid": true,
+        "agentsDetected": [
+          "orchestrator",
+          "planner",
+          "explorer",
+          "executor",
+          "reviewer",
+          "verifier"
+        ],
+        "skillsDetected": [
+          "dynamic-workflow",
+          "graph-recovery",
+          "oma-start",
+          "oma-watch",
+          "quality-oracle",
+          "staged-review"
+        ],
+        "declaredAgents": [
+          "executor",
+          "explorer",
+          "orchestrator",
+          "planner",
+          "reviewer",
+          "summarizer",
+          "verifier",
+          "worker"
+        ],
+        "declaredSkills": [
+          "dynamic-workflow",
+          "graph-recovery",
+          "oma-start",
+          "oma-watch",
+          "quality-oracle",
+          "staged-review"
+        ],
+        "diagnostics": []
+      }
+    }
+  },
+  "pluginValidation": {
+    "exitCode": 0,
+    "output": "  [ok]    C:/Users/User/Documents/Repos/Symap/.agents/plugins/oma\n          ✔ skills      : 6 processed\n          ✔ agents      : 8 processed\n          ✔ commands    : 10 processed (converted to skills)\n          ✔ mcpServers  : 1 processed\n          ✔ hooks       : 2 processed\n"
+  },
+  "mcpRegistration": {
+    "exitCode": 0,
+    "output": "oma-broker                  stdio  enabled  node C:\\Users\\User\\Documents\\Repos\\plugins\\ohmyagy\\dist\\src\\mcp\\broker-server.js"
+  }
+}
