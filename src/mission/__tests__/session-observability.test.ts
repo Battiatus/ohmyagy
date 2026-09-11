@@ -206,7 +206,13 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     assert.ok(events.some((e) => e.type === "round_started" && (e as any).roundIndex === 1));
     assert.ok(events.some((e) => e.type === "gate_evaluated" && (e as any).status === "passed"));
 
-    // 6. Terminal converge_step with isIntegrated: true -> terminal_verdict_rendered and mission_finished emitted
+    // 6. Complete the last work item, THEN run the terminal converge_step.
+    // Declaring success while `task-b` was still ready is precisely the false
+    // success the contract now forbids: a terminal verdict must describe a
+    // mission that is actually finished, not one that is still pending work.
+    executeGraphMarkNode(root, { nodeId: "task-b", state: "succeeded" });
+
+    // 7. Terminal converge_step -> terminal_verdict_rendered and mission_finished emitted
     const termRes = executeConvergeStep(root, {
       missionId,
       currentRound: 2,

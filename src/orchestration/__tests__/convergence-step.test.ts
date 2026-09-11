@@ -96,7 +96,11 @@ describe("evaluateConvergenceStep Unit Tests (T3.2)", () => {
 
     assert.equal(result.status, "in_progress");
     assert.equal(result.consecutiveNoProgressRounds, 0);
-    assert.deepEqual(result.progress, v2);
+    // Work-item counters are owned by the GRAPH, not echoed back from the
+    // caller's history: no node completed here, so nothing is accepted however
+    // optimistic the supplied vector is. The improvement itself is still
+    // measured — that is what keeps consecutiveNoProgressRounds at 0.
+    assert.equal(result.progress.acceptedWorkItems, 0);
   });
 
   it("detects 2-round stagnation and produces no_progress_blocked", () => {
@@ -177,7 +181,7 @@ describe("evaluateConvergenceStep Unit Tests (T3.2)", () => {
     assert.equal(result.consecutiveNoProgressRounds, 0);
   });
 
-  it("declares succeeded when isIntegrated is true", () => {
+  it("does not declare success on isIntegrated alone when nothing was delivered", () => {
     const vClean: ProgressVector = {
       hiddenTestsFailing: 0,
       hiddenTestsPassed: 4,
@@ -197,8 +201,11 @@ describe("evaluateConvergenceStep Unit Tests (T3.2)", () => {
       isIntegrated: true,
     });
 
-    assert.equal(result.status, "succeeded");
-    assert.ok(result.diagnosis?.includes("converged and integrated"));
+    // This is the contract. `isIntegrated` states that integration happened; it
+    // is not evidence that anything was delivered. It used to short-circuit the
+    // whole evaluation and return `succeeded` with zero completed nodes.
+    assert.notEqual(result.status, "succeeded");
+    assert.equal(result.progress.acceptedWorkItems, 0);
   });
 
   it("declares budget_exhausted when round limit is reached", () => {

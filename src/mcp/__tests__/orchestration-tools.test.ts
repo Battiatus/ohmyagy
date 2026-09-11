@@ -162,7 +162,7 @@ describe("Orchestration MCP Tools (Phase 3: T3.4 - T3.7)", () => {
     assert.ok(String(stepRes.structured.diagnosis).includes("Stagnation detected"));
   });
 
-  it("T3.4: converge_step succeeds when isIntegrated is set to true", () => {
+  it("T3.4: converge_step refuses to succeed on isIntegrated alone", () => {
     const node1 = makeAgentNode("task-core");
     callTool("graph_init", {
       missionId: "test-mission",
@@ -174,8 +174,12 @@ describe("Orchestration MCP Tools (Phase 3: T3.4 - T3.7)", () => {
       isIntegrated: true,
     });
 
+    // `task-core` has no incoming edge, so it is ready and nothing is delivered.
+    // A caller assertion used to force `succeeded` here; that is the false
+    // success the success contract exists to prevent.
     assert.equal(stepRes.isError, false);
-    assert.equal(stepRes.structured.status, "succeeded");
+    assert.notEqual(stepRes.structured.status, "succeeded");
+    assert.equal(stepRes.structured.status, "in_progress");
   });
 
   it("T3.6: graph_replan inserts diagnostic node for explorer on verifier failure and marks it ready", () => {
