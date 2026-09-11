@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { OmaDoctor } from "../runtime/doctor.js";
 import { installWorkspacePlugin } from "../packaging/install.js";
+import { BrainStore } from "../brain/brain-store.js";
+import { drainStagedCapture } from "../brain/staging-drain.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
 import { MissionProjectionEngine } from "../graph/mission-projections.js";
 import {
@@ -72,6 +74,36 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
       console.log(`[OMA] Raw measurements written to: ${benchmarkResult.resultsFilePath}`);
       console.log(`[OMA] Human report written to: ${benchmarkResult.reportFilePath}`);
       return 0;
+    }
+
+    if (command === "memory") {
+      const subcommand = args[1];
+      if (subcommand !== "drain") {
+        console.error("Usage: oma memory drain [--json]");
+        return 1;
+      }
+      // Folds the project-agnostic hook capture into this project's Brain. The
+      // hook cannot know its workspace (its cwd is its plugin directory), so the
+      // drain runs here, on the side that does.
+      const brainPath =
+        process.env.OMA_BRAIN_PATH ?? join(workspaceRoot, ".oma", "brain.sqlite");
+      const brain = new BrainStore(brainPath);
+      try {
+        const result = await drainStagedCapture({ brain, workspaceRoot });
+        if (args.includes("--json")) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(
+            `[OMA] Memory drain: ${result.captured} conversation(s) captured, ` +
+              `${result.skippedUnattributed} unattributed (left in journal), ` +
+              `${result.conversationsInspected} inspected.`,
+          );
+          for (const failure of result.errors) console.error(`  ! ${failure}`);
+        }
+        return result.errors.length > 0 ? 1 : 0;
+      } finally {
+        brain.close();
+      }
     }
 
     if (command === "status") {
@@ -581,6 +613,7 @@ function printHelp(): void {
 Usage:
   oma install [--force|-f] [--global|-g]         Install all OMA experts, skills, and plugins (workspace or global)
   oma doctor [--strict] [--attest]                Diagnose environment; --attest also requires hooks loaded + broker tested
+  oma memory drain [--json]                      Fold staged hook capture into this project's Neural Brain
   oma start <goal> [run options]                 Start a mission without supplying a mission id
   oma run <mission-id> --goal <goal> [options]   Execute multi-agent development mission
       Options:

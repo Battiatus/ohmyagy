@@ -294,7 +294,10 @@ export function buildOmaHooks(options: {
   memoryCommand: string;
   memoryEvent?: string;
 }): Record<string, unknown> {
-  const memoryEvent = options.memoryEvent ?? "SessionEnd";
+  // PostToolUse, not Stop or SessionEnd: `Stop` is rejected outright and
+  // `SessionEnd` was never observed firing. PostToolUse is accepted by the parser
+  // and measured firing, and it carries the payload the capture needs.
+  const memoryEvent = options.memoryEvent ?? "PostToolUse";
   const document: Record<string, unknown> = {
     "oma-strict-write-gate": {
       enabled: true,
