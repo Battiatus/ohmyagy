@@ -649,7 +649,15 @@ export function executeGraphInspect(
   const readyNodes = projection.readySet.length;
   const blockedNodes = projection.nodes.filter((n: ProjectedNode) => n.state === "blocked").length;
   const skippedNodes = projection.nodes.filter((n: ProjectedNode) => n.state === "skipped").length;
-  const progressPercentage = totalNodes > 0 ? (succeededNodes / totalNodes) * 100 : 0;
+  // Progress is measured over DELIVERABLE nodes. Counting the engine seed made a
+  // bare `graph_init` report 100% while the graph was in fact `stalled`, which is
+  // the same false-comfort signal as the old `succeeded` verdict.
+  const deliverableNodes = projection.nodes.filter((n: ProjectedNode) => !n.synthetic).length;
+  const deliveredNodes = projection.nodes.filter(
+    (n: ProjectedNode) => !n.synthetic && n.state === "succeeded",
+  ).length;
+  const progressPercentage =
+    deliverableNodes > 0 ? (deliveredNodes / deliverableNodes) * 100 : 0;
 
   return {
     status: "inspected",
@@ -661,6 +669,8 @@ export function executeGraphInspect(
     graphStatus: projection.status,
     metrics: {
       totalNodes,
+      deliverableNodes,
+      deliveredNodes,
       succeededNodes,
       failedNodes,
       runningNodes,
