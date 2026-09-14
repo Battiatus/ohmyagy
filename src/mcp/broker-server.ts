@@ -37,6 +37,13 @@ import {
   DISPATCH_TOOL_NAMES,
   executeDispatchNode,
 } from "./dispatch-tools.js";
+import {
+  discardGitFreeStage,
+  promoteWithoutGit,
+  stageProposalWithoutGit,
+  usesGitFreeStaging,
+} from "../broker/nongit-staging.js";
+import { snapshotWorkspaceState } from "../broker/workspace-snapshot.js";
 import { BrainStore } from "../brain/brain-store.js";
 import {
   BRAIN_SUCCESS_STATUSES,
@@ -811,13 +818,29 @@ function executeProposal(
   input: unknown,
 ): Record<string, unknown> {
   assertUnprotectedProposalInput(input);
-  const source = snapshotCleanGitWorkspace(config.workspaceRoot);
-  const validated = validateProposal(source, input);
+  // A workspace that is not a Git top-level takes the content-addressed path. The contract is
+  // identical — validate against the current content, stage, gate, review, promote — only the
+  // way the parent version is computed and the change applied differs.
+  const gitFree = usesGitFreeStaging(config.workspaceRoot);
+  const source = gitFree
+    ? snapshotWorkspaceState(config.workspaceRoot)
+    : snapshotCleanGitWorkspace(config.workspaceRoot);
+  // In a Git workspace a caller learns the parent version from `git rev-parse HEAD`. Without
+  // Git there is nothing to ask, so `parentVersion: "current"` is an explicit request for the
+  // content as it stands — not a silent substitution: the compare-and-swap still holds from
+  // there, and promotion re-verifies before writing.
+  const normalizedProposal =
+    isRecord(input) && input.parentVersion === "current"
+      ? { ...input, parentVersion: source.version }
+      : input;
+  const validated = validateProposal(source, normalizedProposal);
   assertUnprotectedOperations(validated.operations.map((operation) => operation.path));
 
   let staged: StagedTransaction | undefined;
   try {
-    staged = stageProposal(config.workspaceRoot, input);
+    staged = gitFree
+      ? stageProposalWithoutGit(config.workspaceRoot, normalizedProposal)
+      : stageProposal(config.workspaceRoot, normalizedProposal);
     const evaluation = evaluateStagedTransaction(staged, config.gates);
     if (evaluation.status === "rejected") {
       staged = undefined;
@@ -874,7 +897,8 @@ function executeProposal(
     };
   } catch (error) {
     if (staged && existsSync(staged.containerPath)) {
-      discardStagedTransaction(staged);
+      if (gitFree) discardGitFreeStage(staged);
+      else discardStagedTransaction(staged);
     }
     throw error;
   }
@@ -999,6 +1023,33 @@ function executePromoteChange(
     throw new Error(
       `Staged transaction ${transactionId} not found in active staging cache for promotion.`,
     );
+  }
+
+  if (usesGitFreeStaging(config.workspaceRoot)) {
+    // Same journal preconditions above — author, independent reviewer, digest — then the change
+    // is applied to the workspace and verified against the transaction's own next version.
+    const applied = promoteWithoutGit(stagedRecord.staged);
+    journal.appendTransactionPromoted({
+      runKey: authorRunKey,
+      missionId,
+      leaseId: stagedEvent.leaseId,
+      epoch: stagedEvent.epoch,
+      transactionId,
+      stagedDiffDigest: stagedRecord.stagedDiffDigest,
+      // No commit exists in a Git-free workspace; the content identity of the promoted tree
+      // plays that role, and `promoteWithoutGit` has already checked it equals nextVersion.
+      commitSha: applied.promotedVersion,
+      diffDigest: stagedRecord.stagedDiffDigest,
+    });
+    stagedRecords.delete(transactionId);
+    return {
+      status: "promoted",
+      transactionId,
+      commitSha: applied.promotedVersion,
+      parentVersion: stagedRecord.parentVersion,
+      promotedVersion: applied.promotedVersion,
+      stagingMode: "content-addressed",
+    };
   }
 
   const promotion = promoteApprovedTransaction(stagedRecord.approval, {

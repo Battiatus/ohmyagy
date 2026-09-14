@@ -20,6 +20,7 @@ import {
   validateProposal,
   workspaceStateFromContents,
 } from "./transaction.js";
+import { isGitTopLevel } from "./workspace-snapshot.js";
 
 export type StagingErrorCode =
   | "not_git_repository"
@@ -184,6 +185,34 @@ export function discardStagedTransaction(staged: StagedTransaction): void {
 
 export function assertStagedTransactionState(staged: StagedTransaction): void {
   assertOwnedStagingPaths(staged.containerPath, staged.worktreePath);
+
+  // A Git-free staging container is not a repository, so `git diff`/`ls-files` cannot describe
+  // it. The exhaustive path-set check already ran when the container was built; what a gate
+  // needs here is that each proposed path holds exactly what the transaction says.
+  if (!isGitTopLevel(staged.worktreePath)) {
+    for (const operation of staged.transaction.operations) {
+      const target = resolveSafeTarget(staged.worktreePath, operation.path);
+      if (operation.kind === "delete") {
+        if (existsSync(target)) {
+          throw new StagingError(
+            "stage_state_mismatch",
+            `Deleted path still exists in staging: ${operation.path}.`,
+            staged.worktreePath,
+          );
+        }
+        continue;
+      }
+      if (!existsSync(target) || readFileSync(target, "utf8") !== operation.content) {
+        throw new StagingError(
+          "stage_state_mismatch",
+          `Staged content does not match proposal for ${operation.path}.`,
+          staged.worktreePath,
+        );
+      }
+    }
+    return;
+  }
+
   const changed = new Set(
     runGit(staged.worktreePath, ["diff", "--name-only", "-z", "HEAD", "--"])
       .split("\0")
@@ -314,7 +343,7 @@ function requireRepositoryRoot(inputRoot: string): string {
   return canonicalRoot;
 }
 
-function resolveSafeTarget(root: string, transactionPath: string): string {
+export function resolveSafeTarget(root: string, transactionPath: string): string {
   if (isAbsolute(transactionPath)) {
     throw new StagingError("stage_apply_failed", `Absolute path rejected: ${transactionPath}`);
   }
@@ -329,7 +358,7 @@ function resolveSafeTarget(root: string, transactionPath: string): string {
   return target;
 }
 
-function assertNoSymlinkAncestor(root: string, transactionPath: string): void {
+export function assertNoSymlinkAncestor(root: string, transactionPath: string): void {
   let current = resolve(root);
   const segments = transactionPath.split("/");
   for (const segment of segments.slice(0, -1)) {
@@ -354,7 +383,7 @@ function cleanupFailedStage(
   runGitAllowFailure(repositoryRoot, ["worktree", "prune"]);
 }
 
-function assertOwnedStagingPaths(containerPath: string, worktreePath: string): void {
+export function assertOwnedStagingPaths(containerPath: string, worktreePath: string): void {
   const resolvedContainer = resolve(containerPath);
   const resolvedTemp = resolve(tmpdir());
   const fromTemp = relative(resolvedTemp, resolvedContainer);
