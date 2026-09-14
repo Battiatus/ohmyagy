@@ -17,6 +17,7 @@ import {
 import { executeGraphInit, executeGraphMarkNode } from "../../mcp/graph-tools.js";
 import { executeConvergeStep, executeGraphReplan } from "../../mcp/orchestration-tools.js";
 import { runOmaCli } from "../../cli/oma-cli.js";
+import { recordInterview } from "../interview-gate.js";
 import type { GraphNode } from "../../graph/model.js";
 
 let root: string;
@@ -100,8 +101,24 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     removeTree(root);
   });
 
+  /**
+   * A mission cannot be driven before the user answered and confirmed, so these tests
+   * record the interview a real mission would have. The gate's own refusals are asserted
+   * in src/mission/__tests__/interview-gate.test.ts.
+   */
+  function authorise(missionId: string): void {
+    recordInterview({
+      workspaceRoot: root,
+      missionId,
+      questions: ["What is the deliverable?"],
+      answers: ["A verified report."],
+      confirmed: true,
+    });
+  }
+
   it("T6.1 & T6.2: session lifecycle emits standard mission events and formats identically in listMissions and summarizeMission", () => {
     const missionId = "session-mission-alpha";
+    authorise(missionId);
     const nodeA = makeTestNode("task-a", "Task Alpha");
     const nodeB = makeTestNode("task-b", "Task Beta");
 
@@ -252,6 +269,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     assert.equal(findActiveMissionId(root), undefined);
 
     const missionId = "session-active-test-42";
+    authorise(missionId);
     executeGraphInit(root, {
       missionId,
       nodes: [makeTestNode("node-1"), makeTestNode("node-2")],
@@ -334,6 +352,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
 
   it("T6.1 & T6.2: MCP broker mission_status and list_missions seamlessly query session-native execution", () => {
     const missionId = "mcp-session-test";
+    authorise(missionId);
     const initRes = callTool("graph_init", {
       missionId,
       nodes: [makeTestNode("mcp-task-1", "MCP Task 1")],
@@ -380,6 +399,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
 
   it("T6.2: stagnation (no_progress_blocked) emits terminal events and transitions status to blocked", () => {
     const missionId = "stagnation-session-test";
+    authorise(missionId);
     executeGraphInit(root, {
       missionId,
       nodes: [makeTestNode("stagnant-node")],
@@ -439,6 +459,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
 
   it("T6.2: graph_replan emits work_item_discovered in the canonical mission journal", () => {
     const missionId = "replan-session-test";
+    authorise(missionId);
     const failedNode = makeTestNode("failing-node", "Failing Node");
     executeGraphInit(root, {
       missionId,

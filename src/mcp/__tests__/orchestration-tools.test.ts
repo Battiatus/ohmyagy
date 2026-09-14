@@ -13,6 +13,7 @@ import {
   executeGraphReplan,
 } from "../orchestration-tools.js";
 import type { GraphNode } from "../../graph/model.js";
+import { recordInterview } from "../../mission/interview-gate.js";
 
 let root: string;
 let config: BrokerConfig;
@@ -82,6 +83,15 @@ beforeEach(() => {
     journalStorePath: join(root, ".oma", "ledger", "events.jsonl"),
   });
   stagedRecords = new Map();
+  // These tests model a mission the user has already been interviewed about: the
+  // gate's own refusals are asserted in src/mission/__tests__/interview-gate.test.ts.
+  recordInterview({
+    workspaceRoot: root,
+    missionId: "test-mission",
+    questions: ["What must be delivered, and how will it be judged?"],
+    answers: ["A verified report; judged by an independent reviewer."],
+    confirmed: true,
+  });
 });
 
 afterEach(() => {

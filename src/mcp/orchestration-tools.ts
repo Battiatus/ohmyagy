@@ -8,6 +8,7 @@ import { graphPaths, loadGraphRuntime, verifyGraphStore } from "../graph/store.j
 import type { GraphEdge, GraphNode } from "../graph/model.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
 import { eventsPathFor, findActiveMissionId, ensureMissionStarted } from "../mission/read-model.js";
+import { assertInterviewAuthorisesExecution } from "../mission/interview-gate.js";
 import {
   evaluateConvergenceStep,
   type ConvergenceStepResult,
@@ -231,6 +232,10 @@ export function executeConvergeStep(
 ): Record<string, unknown> {
   const missionId = resolveMissionId(workspaceRoot, input);
   assertMissionOwnsGraph(workspaceRoot, missionId);
+  // converge_step is the conductor's drive point: it is how a mission advances toward
+  // dispatching work. The interview gate therefore applies here too, not only at the
+  // node transition, so the loop cannot start before the user has answered.
+  assertInterviewAuthorisesExecution({ workspaceRoot, missionId });
   const paths = graphPaths(workspaceRoot);
 
   if (!existsSync(paths.definition) && !existsSync(paths.events)) {

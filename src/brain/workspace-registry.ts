@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { safeSegment } from "./agy-capture.js";
@@ -50,8 +51,21 @@ export function omaHomeDir(homeDirectory?: string): string {
   return join(base, ".oma");
 }
 
-export function workspaceRegistryPath(homeDirectory?: string): string {
-  return join(omaHomeDir(homeDirectory), "workspaces.json");
+export function workspaceRegistryDir(homeDirectory?: string): string {
+  return join(omaHomeDir(homeDirectory), "workspaces");
+}
+
+/**
+ * One file per workspace, named after a digest of its root.
+ *
+ * A single `workspaces.json` was read-modify-written by every broker, so two sessions
+ * open at once clobbered each other: the last writer won and the other project vanished
+ * from the registry. Measured 2026-09-14 as a flaky isolation test. A file per root has
+ * no shared state to race over.
+ */
+function workspaceRegistrationPath(workspaceRoot: string, homeDirectory?: string): string {
+  const digest = createHash("sha256").update(samePathKey(workspaceRoot)).digest("hex");
+  return join(workspaceRegistryDir(homeDirectory), `${digest.slice(0, 32)}.json`);
 }
 
 export function conversationBindingPath(
@@ -67,9 +81,13 @@ export function conversationBindingPath(
 
 /** Windows compares paths case-insensitively; POSIX does not. */
 export function sameWorkspacePath(left: string, right: string): boolean {
-  const normalize = (value: string): string =>
-    process.platform === "win32" ? resolve(value).toLocaleLowerCase("en-US") : resolve(value);
-  return normalize(left) === normalize(right);
+  return samePathKey(left) === samePathKey(right);
+}
+
+function samePathKey(value: string): string {
+  return process.platform === "win32"
+    ? resolve(value).toLocaleLowerCase("en-US")
+    : resolve(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,21 +103,30 @@ function writeJsonAtomically(path: string, value: unknown): void {
 export function readRegisteredWorkspaces(
   homeDirectory?: string,
 ): WorkspaceRegistration[] {
-  const path = workspaceRegistryPath(homeDirectory);
-  if (!existsSync(path)) return [];
-  let parsed: unknown;
+  const dir = workspaceRegistryDir(homeDirectory);
+  if (!existsSync(dir)) return [];
+  let names: string[];
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    names = readdirSync(dir).filter((name) => name.endsWith(".json"));
   } catch {
     return [];
   }
-  if (!Array.isArray(parsed)) return [];
   const registrations: WorkspaceRegistration[] = [];
-  for (const entry of parsed) {
-    if (!isRecord(entry)) continue;
-    const { root, source, lastSeenAt } = entry;
+  const seen = new Set<string>();
+  for (const name of names) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(join(dir, name), "utf8"));
+    } catch {
+      continue;
+    }
+    if (!isRecord(parsed)) continue;
+    const { root, source, lastSeenAt } = parsed;
     if (typeof root !== "string" || root.length === 0) continue;
     if (typeof source !== "string") continue;
+    const key = samePathKey(root);
+    if (seen.has(key)) continue;
+    seen.add(key);
     registrations.push({
       root: resolve(root),
       source,
@@ -125,14 +152,14 @@ export function registerWorkspace(options: {
   const root = resolve(options.workspaceRoot);
   const at = options.at ?? new Date().toISOString();
   try {
-    mkdirSync(omaHomeDir(options.homeDirectory), { recursive: true });
-    const existing = readRegisteredWorkspaces(options.homeDirectory).filter(
-      (registration) => !sameWorkspacePath(registration.root, root),
-    );
-    existing.push({ root, source: options.source, lastSeenAt: at });
-    writeJsonAtomically(workspaceRegistryPath(options.homeDirectory), existing);
+    mkdirSync(workspaceRegistryDir(options.homeDirectory), { recursive: true });
+    writeJsonAtomically(workspaceRegistrationPath(root, options.homeDirectory), {
+      root,
+      source: options.source,
+      lastSeenAt: at,
+    });
   } catch {
-    // A missing registry costs attribution precision, never correctness.
+    // A missing registration costs reporting precision, never correctness.
   }
 }
 

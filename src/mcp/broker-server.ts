@@ -31,6 +31,7 @@ import {
 } from "../mission/read-model.js";
 import { OmaDoctor, describeWorkspace, type WorkspaceReport } from "../runtime/doctor.js";
 import { registerWorkspace } from "../brain/workspace-registry.js";
+import { recordInterview } from "../mission/interview-gate.js";
 import { BrainStore } from "../brain/brain-store.js";
 import {
   BRAIN_SUCCESS_STATUSES,
@@ -493,6 +494,40 @@ export function handleRequest(
               properties: {},
             },
           },
+          {
+            name: "record_interview",
+            description:
+              "Record the interview that authorises this mission's execution. No run is dispatched and no convergence verdict is rendered until the user's answers and explicit confirmation are recorded here. Refuses an interview with no question or no answer.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                missionId: {
+                  type: "string",
+                  description: "Mission identifier. Defaults to the mission owning the workspace graph.",
+                },
+                questions: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "The questions actually put to the user, in order.",
+                },
+                answers: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "The user's answers, aligned with the questions.",
+                },
+                confirmed: {
+                  type: "boolean",
+                  description:
+                    "True only when the user explicitly said to proceed. Asking is not confirmation.",
+                },
+                conversationId: {
+                  type: "string",
+                  description: "Host conversation that produced the answers, when known.",
+                },
+              },
+              required: ["questions", "answers", "confirmed"],
+            },
+          },
           ...BRAIN_TOOL_DEFINITIONS,
           ...GRAPH_TOOL_DEFINITIONS,
           ...ROUTING_TOOL_DEFINITIONS,
@@ -524,6 +559,8 @@ export function handleRequest(
         result = executeResumeMission(config, input);
       } else if (toolName === "doctor") {
         result = executeDoctor(config);
+      } else if (toolName === "record_interview") {
+        result = executeRecordInterview(config, input);
       } else if (typeof toolName === "string" && BRAIN_TOOL_NAMES.has(toolName)) {
         const accessor = getBrain ?? createBrainAccessor(config);
         result = executeBrainTool(accessor(), config.workspaceRoot, toolName, input);
@@ -546,6 +583,7 @@ export function handleRequest(
         result.status !== "resumed" &&
         result.status !== "succeeded" &&
         result.status !== "reported" &&
+        result.status !== "interview_recorded" &&
         !(typeof result.status === "string" && BRAIN_SUCCESS_STATUSES.has(result.status)) &&
         !(typeof result.status === "string" && GRAPH_SUCCESS_STATUSES.has(result.status)) &&
         !(typeof result.status === "string" && ROUTING_SUCCESS_STATUSES.has(result.status)) &&
@@ -694,6 +732,37 @@ function executeDoctor(config: BrokerConfig): Record<string, unknown> {
   return {
     status: "reported",
     report: OmaDoctor.diagnoseEnvironment(config.workspaceRoot, config.workspaceRootSource),
+  };
+}
+
+/**
+ * Record the interview that authorises execution.
+ *
+ * The gate lives in the mission journal, not in the conductor's prompt: until this is
+ * called with `confirmed: true`, `converge_step` and `graph_mark_node(running)` refuse.
+ */
+function executeRecordInterview(config: BrokerConfig, input: unknown): Record<string, unknown> {
+  const missionId = resolveMissionId(config, input);
+  const eventsPath = ensureMissionStarted(config.workspaceRoot, missionId);
+  const fields = isRecord(input) ? input : {};
+  const interview = recordInterview({
+    workspaceRoot: config.workspaceRoot,
+    missionId,
+    questions: fields.questions,
+    answers: fields.answers,
+    confirmed: fields.confirmed,
+    conversationId: fields.conversationId,
+  });
+  return {
+    status: "interview_recorded",
+    missionId,
+    eventsPath,
+    questions: interview.questions.length,
+    answers: interview.answers.length,
+    confirmed: interview.confirmed,
+    blocking: interview.confirmed
+      ? null
+      : "Execution stays blocked until record_interview is called again with confirmed=true.",
   };
 }
 

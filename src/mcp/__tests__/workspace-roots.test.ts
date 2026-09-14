@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "bun:test";
+import { openDatabase } from "../../brain/sqlite-adapter.js";
 import { appendStagedRecord } from "../../brain/agy-capture.js";
-import { bindConversation } from "../../brain/workspace-registry.js";
+import { bindConversation, readRegisteredWorkspaces } from "../../brain/workspace-registry.js";
 
 /**
  * The invariant this file exists to protect: **a session's project identity comes
@@ -139,16 +139,18 @@ interface BrainSummary {
   sessionIds: string[];
 }
 
-/** Read a Brain read-only. Throws while the file is still being created. */
+/** Read a Brain through the cross-runtime adapter: `node:sqlite` is not resolvable under `bun test --isolate`. */
 function readBrain(brainPath: string): BrainSummary {
-  const db = new DatabaseSync(brainPath, { readOnly: true });
+  const db = openDatabase(brainPath);
   try {
-    const roots = (
-      db.prepare("SELECT root_path FROM projects").all() as Array<{ root_path: string }>
-    ).map((row) => row.root_path);
-    const sessionIds = (
-      db.prepare("SELECT id FROM sessions").all() as Array<{ id: string }>
-    ).map((row) => row.id);
+    const roots = db
+      .prepare("SELECT root_path FROM projects")
+      .all<{ root_path: string }>()
+      .map((row) => row.root_path);
+    const sessionIds = db
+      .prepare("SELECT id FROM sessions")
+      .all<{ id: string }>()
+      .map((row) => row.id);
     return { projects: roots.length, sessions: sessionIds.length, roots, sessionIds };
   } finally {
     db.close();
@@ -244,9 +246,7 @@ test("the host's roots decide the project, not the directory the editor used as 
 
     // The resolved project must be published: capture attribution is decided against
     // the workspaces that really bound, so a silent bind would leave memory stuck.
-    const registry = JSON.parse(
-      readFileSync(join(home, ".oma", "workspaces.json"), "utf8"),
-    ) as Array<{ root: string; source: string }>;
+    const registry = readRegisteredWorkspaces(home);
     assert.equal(registry.length, 1, `registry: ${JSON.stringify(registry)}`);
     assert.equal(registry[0].root, project);
     assert.equal(registry[0].source, "roots/list");
@@ -271,7 +271,7 @@ test("an editor-install workspace with no host roots is refused, not silently us
     assert.equal(existsSync(join(editorInstall, ".oma")), false);
     // A broker that only guessed its cwd has no project to publish. Registering the
     // install tree would put it into the set attribution is decided against.
-    assert.equal(existsSync(join(home, ".oma", "workspaces.json")), false);
+    assert.deepEqual(readRegisteredWorkspaces(home), []);
 
     // The escape hatch stays open: the cause must stay diagnosable.
     const doctor = await broker.request(3, "tools/call", { name: "doctor", arguments: {} });
@@ -358,10 +358,9 @@ test("two projects each get their own brain and never share a session", { timeou
     assert.equal(existsSync(brainB), true);
 
     // The registry knows both projects, so later attribution has a bounded set to
-    // decide against instead of "does this touch my root".
-    const registry = JSON.parse(
-      readFileSync(join(home, ".oma", "workspaces.json"), "utf8"),
-    ) as Array<{ root: string; source: string }>;
+    // decide against instead of "does this touch my root". Two brokers publish
+    // concurrently, which is why each root gets its own file.
+    const registry = readRegisteredWorkspaces(home);
     assert.equal(registry.length, 2, JSON.stringify(registry));
     assert.deepEqual(
       registry.map((entry) => entry.source),

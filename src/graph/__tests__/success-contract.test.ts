@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,24 @@ import {
   executeGraphMarkNode,
 } from "../../mcp/graph-tools.js";
 import { executeConvergeStep } from "../../mcp/orchestration-tools.js";
+import { recordInterview } from "../../mission/interview-gate.js";
+
+/**
+ * A mission cannot be driven before the user has answered and confirmed, so every test
+ * that reaches `converge_step` has to record the interview a real mission would have.
+ * That is the contract, not test plumbing: the gate is what stops a conductor from
+ * planning and dispatching without ever asking anything.
+ */
+function recordConfirmedInterview(root: string): void {
+  const missionId = readFileSync(join(root, ".oma", "graph", "session-mission-id"), "utf8").trim();
+  recordInterview({
+    workspaceRoot: root,
+    missionId,
+    questions: ["What is the measurable success criterion?"],
+    answers: ["An evidence-backed report that contradicts the documentation."],
+    confirmed: true,
+  });
+}
 
 /**
  * Regression guard for the success contract.
@@ -52,6 +70,7 @@ describe("success contract: no victory without delivered work", () => {
   test("graph_init alone declares no deliverable and cannot be succeeded", () => {
     withWorkspace((root) => {
       const init = executeGraphInit(root, { goal: "Audit something" });
+      recordConfirmedInterview(root);
       assert.equal(init.deliverableNodes, 0);
       assert.equal(init.requiresPlan, true, "a bare init must ask for a plan");
 
@@ -81,6 +100,7 @@ describe("success contract: no victory without delivered work", () => {
   test("isIntegrated can veto but can never force success", () => {
     withWorkspace((root) => {
       executeGraphInit(root, { goal: "g", nodes: [DELIVERABLE_NODE], edges: [] });
+      recordConfirmedInterview(root);
       // `work` has no incoming edge, so it is ready and nothing is delivered.
       const step = executeConvergeStep(root, { isIntegrated: true, currentRound: 1 });
       assert.notEqual(
@@ -95,6 +115,7 @@ describe("success contract: no victory without delivered work", () => {
   test("a converged graph with a delivered node DOES succeed (positive control)", () => {
     withWorkspace((root) => {
       executeGraphInit(root, { goal: "g", nodes: [DELIVERABLE_NODE], edges: [] });
+      recordConfirmedInterview(root);
       executeGraphMarkNode(root, { nodeId: "work", state: "succeeded" });
 
       const inspect = executeGraphInspect(root);
@@ -109,6 +130,7 @@ describe("success contract: no victory without delivered work", () => {
   test("work-item counters come from the graph, not from the caller", () => {
     withWorkspace((root) => {
       executeGraphInit(root, { goal: "g", nodes: [DELIVERABLE_NODE], edges: [] });
+      recordConfirmedInterview(root);
       executeGraphMarkNode(root, { nodeId: "work", state: "succeeded" });
 
       // The caller lies: it claims nothing was accepted. The graph disagrees, and

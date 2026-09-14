@@ -21,6 +21,7 @@ import {
 } from "../graph/model.js";
 import { MissionEventsStore, type WorkItemDiscoveredPayload } from "../ledger/mission-events.js";
 import { eventsPathFor, findActiveMissionId, ensureMissionStarted } from "../mission/read-model.js";
+import { assertInterviewAuthorisesExecution } from "../mission/interview-gate.js";
 
 /**
  * MCP tool surface for the Execution Graph.
@@ -543,6 +544,10 @@ export function executeGraphMarkNode(
         readySet: projection.readySet,
       };
     }
+    // Marking a node running is where work actually starts. The interview gate is
+    // enforced here rather than described in a skill, so an un-interviewed mission
+    // cannot dispatch anything at all.
+    assertInterviewAuthorisesExecution({ workspaceRoot, missionId });
     lastEvent = appendGraphTransition(runtime, {
       eventType: "node_dispatched",
       nodeId,

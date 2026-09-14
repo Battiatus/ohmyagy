@@ -49,7 +49,7 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
     ]);
     const listed = resultFor(responses1, 2);
     assert.ok(Array.isArray(listed.tools));
-    assert.equal(listed.tools.length, 23);
+    assert.equal(listed.tools.length, 24);
     const toolNames = listed.tools.map((t: { name: string }) => t.name).sort();
     assert.deepEqual(toolNames, [
       "attest_review",
@@ -73,6 +73,7 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
       "plan_route",
       "promote_change",
       "propose_change",
+      "record_interview",
       "resume_mission",
       "run_mission",
     ]);

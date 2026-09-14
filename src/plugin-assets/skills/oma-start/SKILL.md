@@ -69,6 +69,19 @@ Before ANY execution, graph initialization, or file mutation, the Conductor MUST
 3. **MANDATORY BLOCKING GATE — Zero Run Before Confirmation**:
    **STRICT ENFORCEMENT: ZERO RUN / ZERO EXECUTION BEFORE EXPLICIT USER ANSWERS AND CONFIRMATION.**
    The conductor MUST NOT call `graph_init`, MUST NOT mutate files, MUST NOT stage changes, and MUST NOT dispatch workers until the user has provided explicit answers and confirmed the proposed direction. Execution is blocked at this gate. Present the summary and questions directly to the user (via interactive modal `ask_question` or explicit conversational prompt) and halt execution to await user response.
+4. **Record the interview (`record_interview`) — this is what releases the gate**:
+   The gate is enforced by the mission journal, not by good intentions. Until the user's questions, answers and confirmation are recorded, `graph_init` still works (planning is not execution) but **every `converge_step` and every `graph_mark_node` with `state: "running"` is refused** with `no recorded interview`. So immediately after the user answers:
+   ```json
+   {
+     "tool": "record_interview",
+     "arguments": {
+       "questions": ["<question 1>", "<question 2>"],
+       "answers": ["<the user's answer 1>", "<the user's answer 2>"],
+       "confirmed": true
+     }
+   }
+   ```
+   Pass `"confirmed": false` when the user answered but has not yet said to proceed: the answers are stored and execution stays blocked. Never record an interview the user did not answer, and never set `confirmed: true` on your own initiative.
 
 ---
 

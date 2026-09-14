@@ -6,6 +6,7 @@ export type { ProgressVector };
 
 export type MissionEventType =
   | "mission_started"
+  | "interview_recorded"
   | "work_item_discovered"
   | "run_started"
   | "artifact_created"
@@ -33,6 +34,20 @@ export interface MissionStartedPayload {
   rulebookRevision: string;
   goal: string;
   totalBudgets?: { maxTokens?: number; maxTimeMs?: number; maxRounds?: number };
+}
+
+export interface InterviewRecordedPayload {
+  /** The questions actually put to the user, in the order they were asked. */
+  questions: string[];
+  /** The user's answers, aligned with `questions`. */
+  answers: string[];
+  /**
+   * The user's explicit go-ahead. An interview the user never confirmed does not
+   * authorise a single run: the gate is the confirmation, not the asking.
+   */
+  confirmed: boolean;
+  /** Host conversation that produced the answers, when the caller knows it. */
+  conversationId?: string;
 }
 
 export interface WorkItemDiscoveredPayload {
@@ -130,6 +145,7 @@ export interface MissionFinishedPayload {
 
 export type MissionEventPayload =
   | ({ type: "mission_started" } & MissionStartedPayload)
+  | ({ type: "interview_recorded" } & InterviewRecordedPayload)
   | ({ type: "work_item_discovered" } & WorkItemDiscoveredPayload)
   | ({ type: "run_started" } & RunStartedPayload)
   | ({ type: "artifact_created" } & ArtifactCreatedPayload)

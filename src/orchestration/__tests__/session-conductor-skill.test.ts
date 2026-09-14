@@ -8,6 +8,7 @@ import { installWorkspacePlugin } from "../../packaging/install.js";
 import { executePlanRoute } from "../../mcp/routing-tools.js";
 import { executeGraphTool } from "../../mcp/graph-tools.js";
 import { executeConvergeStep, executeGraphReplan } from "../../mcp/orchestration-tools.js";
+import { recordInterview } from "../../mission/interview-gate.js";
 
 describe("Phase 4: Session-Native Conductor Skill & Invariants (T4.1 - T4.4)", () => {
   const repoRoot = resolve(process.cwd());
@@ -109,6 +110,13 @@ describe("Phase 4: Session-Native Conductor Skill & Invariants (T4.1 - T4.4)", (
     assert.match(content, /zero run/i);
     assert.match(content, /blocked/i);
     assert.match(content, /MUST NOT call `graph_init`/i);
+
+    // Sequence 4: the skill must name the tool that actually releases the gate. Prose
+    // alone was the whole problem: `ask_question` did not exist, and the gate was a
+    // sentence an agent could skip. A skill that describes a gate without naming the
+    // enforced call is the drift this assertion exists to catch.
+    assert.match(content, /record_interview/);
+    assert.match(content, /confirmed/i);
   });
 
   it("T4.3: skill specifies mode selection calling plan_route {mode} to obtain canonical roles & ModeConfig", () => {
@@ -216,6 +224,27 @@ describe("Phase 4: Session-Native Conductor Skill & Invariants (T4.1 - T4.4)", (
         ],
       });
       assert.equal(initResult.status, "initialized");
+
+      // Step 4.5: the interview gate. A mission cannot converge — let alone dispatch —
+      // until the user has answered and confirmed; this is enforced by the mission
+      // journal, not by the skill text.
+      const gateRefusal = (() => {
+        try {
+          executeConvergeStep(tempDir, { missionId, currentRound: 0 });
+          return undefined;
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      })();
+      assert.match(String(gateRefusal), /no recorded interview/u);
+
+      recordInterview({
+        workspaceRoot: tempDir,
+        missionId,
+        questions: ["Which parsing edge case, and what proves it is fixed?"],
+        answers: ["Empty input; a reproduction test that fails before the fix."],
+        confirmed: true,
+      });
 
       // Step 5.1: converge_step round 1
       const step1 = executeConvergeStep(tempDir, {
