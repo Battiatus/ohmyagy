@@ -3,9 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "bun:test";
-import { executeGraphInit } from "../graph-tools.js";
+import { executeGraphInit, executeGraphMarkNode } from "../graph-tools.js";
 import { executeDispatchNode } from "../dispatch-tools.js";
 import { recordInterview } from "../../mission/interview-gate.js";
+import { recordRun } from "../../mission/__tests__/support/attributed-run.js";
 import { readModelCatalog } from "../../runtime/model-catalog.js";
 import { MissionEventsStore } from "../../ledger/mission-events.js";
 import { eventsPathFor } from "../../mission/read-model.js";
@@ -282,6 +283,62 @@ describe("dispatch_node runs the expert the node is assigned to", () => {
       evidence: [".oma/graph"],
       confidence: "high",
     });
+  });
+
+  it("refuses a completion that no dispatched run backs", async () => {
+    executeGraphInit(root, { missionId: "m-unattributed", goal: "g", nodes: [explorerNode()], edges: [] });
+    authorise("m-unattributed");
+
+    // The old code wrote its own `run_finished` for this transition, attributed to whichever
+    // expert the caller named, so any node could be completed with nothing behind it.
+    assert.throws(
+      () => executeGraphMarkNode(root, { missionId: "m-unattributed", nodeId: "explore-db", state: "succeeded" }),
+      /no run was ever started for it[\s\S]*dispatch_node/u,
+    );
+  });
+
+  it("accepts a completion once the node's own expert has run", async () => {
+    executeGraphInit(root, { missionId: "m-attributed", goal: "g", nodes: [explorerNode()], edges: [] });
+    authorise("m-attributed");
+
+    const dispatched = await executeDispatchNode({
+      workspaceRoot: root,
+      input: { nodeId: "explore-db", missionId: "m-attributed" },
+      driver: fakeDriver([]),
+    });
+    assert.equal(dispatched.succeeded, true);
+
+    const marked = executeGraphMarkNode(root, {
+      missionId: "m-attributed",
+      nodeId: "explore-db",
+      state: "succeeded",
+    });
+    assert.equal(marked.status, "node_marked");
+    assert.equal(marked.state, "succeeded");
+  });
+
+  it("refuses a completion performed by an expert other than the node's own", async () => {
+    executeGraphInit(root, { missionId: "m-wrong-expert", goal: "g", nodes: [explorerNode()], edges: [] });
+    authorise("m-wrong-expert");
+
+    // A successful run happened — but a verifier did it, and this node is assigned to an
+    // explorer. Attribution to the node's own expert is the point of the rule.
+    recordRun({
+      workspaceRoot: root,
+      missionId: "m-wrong-expert",
+      nodeId: "explore-db",
+      expertId: "verifier",
+    });
+
+    assert.throws(
+      () =>
+        executeGraphMarkNode(root, {
+          missionId: "m-wrong-expert",
+          nodeId: "explore-db",
+          state: "succeeded",
+        }),
+      /assigned to expert 'explorer'[\s\S]*'verifier'/u,
+    );
   });
 
   it("records a failed run as failed instead of reporting a dispatch", async () => {

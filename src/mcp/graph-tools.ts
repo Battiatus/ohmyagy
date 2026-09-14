@@ -22,6 +22,7 @@ import {
 import { MissionEventsStore, type WorkItemDiscoveredPayload } from "../ledger/mission-events.js";
 import { eventsPathFor, findActiveMissionId, ensureMissionStarted } from "../mission/read-model.js";
 import { assertInterviewAuthorisesExecution } from "../mission/interview-gate.js";
+import { assertNodeCompletionIsAttributed } from "../mission/run-attribution.js";
 
 /**
  * MCP tool surface for the Execution Graph.
@@ -566,6 +567,19 @@ export function executeGraphMarkNode(
     } catch {}
   } else if (state === "succeeded" || state === "completed" || state === "failed") {
     const outcome = state === "failed" || input.outcome === "failure" ? "failure" : "success";
+
+    if (outcome === "success") {
+      // Checked BEFORE this transition writes its own `run_finished`, otherwise the record
+      // it is about to create would satisfy its own precondition. A node may only be
+      // completed if a dispatched run for it already finished successfully — and if the
+      // node names an executor, that executor ran it.
+      assertNodeCompletionIsAttributed({
+        workspaceRoot,
+        missionId,
+        nodeId,
+        expectedExpert: targetNode.executor?.persona,
+      });
+    }
 
     if (projectedNode.state === "ready") {
       appendGraphTransition(runtime, {

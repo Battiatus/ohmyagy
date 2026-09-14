@@ -9,6 +9,7 @@ import { loadGraphRuntime, verifyGraphStore } from "../../graph/store.js";
 import { calculateProposalDigest, type GraphProposal } from "../../graph/proposal.js";
 import { projectGraph } from "../../graph/kernel.js";
 import type { GraphEdge, GraphNode } from "../../graph/model.js";
+import { recordSuccessfulRun } from "../../mission/__tests__/support/attributed-run.js";
 
 let root: string;
 let config: BrokerConfig;
@@ -244,7 +245,8 @@ test("complete cycle: graph_mark_node advances DAG and reveals new ready nodes",
   assert.equal(initialReady.isError, false);
   assert.deepEqual(initialReady.structured.readySet, ["step_1"]);
 
-  // Mark step_1 succeeded
+  // Mark step_1 succeeded — a completion now has to be backed by a finished run.
+  recordSuccessfulRun(root, "step_1", "oma-executor", "mission-cycle");
   const mark1 = callTool("graph_mark_node", {
     nodeId: "step_1",
     state: "succeeded",
@@ -261,6 +263,7 @@ test("complete cycle: graph_mark_node advances DAG and reveals new ready nodes",
   assert.deepEqual(readyAfter1.structured.readySet, ["step_2"]);
 
   // Mark step_2 succeeded
+  recordSuccessfulRun(root, "step_2", "oma-executor", "mission-cycle");
   const mark2 = callTool("graph_mark_node", {
     nodeId: "step_2",
     state: "succeeded",
@@ -281,6 +284,7 @@ test("recovery: re-loadGraphRuntime after transitions confirms no completed work
   });
   assert.equal(initRes.isError, false);
 
+  recordSuccessfulRun(root, "task_A", "oma-executor", "mission-recovery");
   const markRes = callTool("graph_mark_node", {
     nodeId: "task_A",
     state: "succeeded",
@@ -313,6 +317,7 @@ test("graph_inspect returns graph projection and progress metrics", () => {
   });
   assert.equal(initRes.isError, false);
 
+  recordSuccessfulRun(root, "node_1", "oma-executor", "mission-inspect");
   const markRes = callTool("graph_mark_node", { nodeId: "node_1", state: "succeeded" });
   assert.equal(markRes.isError, false);
 

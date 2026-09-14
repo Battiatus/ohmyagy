@@ -18,6 +18,7 @@ import { executeGraphInit, executeGraphMarkNode } from "../../mcp/graph-tools.js
 import { executeConvergeStep, executeGraphReplan } from "../../mcp/orchestration-tools.js";
 import { runOmaCli } from "../../cli/oma-cli.js";
 import { recordInterview } from "../interview-gate.js";
+import { recordSuccessfulRun } from "./support/attributed-run.js";
 import type { GraphNode } from "../../graph/model.js";
 
 let root: string;
@@ -169,6 +170,9 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     assert.deepEqual(summary.running, ["task-a"]);
 
     // 4. Mark task-a as succeeded -> run_finished & integration_attempted emitted, unlocking task-b
+    // A completion must be backed by a finished run: the observability subject here is the
+    // event stream, so the run is recorded rather than really dispatched.
+    recordSuccessfulRun(root, "task-a", "executor", missionId);
     executeGraphMarkNode(root, {
       missionId,
       nodeId: "task-a",
@@ -227,6 +231,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     // Declaring success while `task-b` was still ready is precisely the false
     // success the contract now forbids: a terminal verdict must describe a
     // mission that is actually finished, not one that is still pending work.
+    recordSuccessfulRun(root, "task-b", "executor", missionId);
     executeGraphMarkNode(root, { nodeId: "task-b", state: "succeeded" });
 
     // 7. Terminal converge_step -> terminal_verdict_rendered and mission_finished emitted
@@ -290,6 +295,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     assert.equal(findActiveMissionId(root), missionId);
 
     // Succeeded node 1 and intermediate converge step: still active because node-2 is pending
+    recordSuccessfulRun(root, "node-1", "executor", missionId);
     executeGraphMarkNode(root, {
       missionId,
       nodeId: "node-1",
@@ -301,6 +307,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     assert.equal(findActiveMissionId(root), missionId);
 
     // Now execute node-2 to terminal completion
+    recordSuccessfulRun(root, "node-2", "executor", missionId);
     executeGraphMarkNode(root, {
       missionId,
       nodeId: "node-2",
@@ -375,6 +382,7 @@ describe("Unified Mission Observability (Phase 6: T6.1 - T6.3)", () => {
     assert.ok(missions.some((m) => m.missionId === missionId && m.status === "in_progress"));
 
     // 3. Mark node succeeded and converge to completion
+    recordSuccessfulRun(root, "mcp-task-1", "executor", missionId);
     const markRes = callTool("graph_mark_node", {
       missionId,
       nodeId: "mcp-task-1",

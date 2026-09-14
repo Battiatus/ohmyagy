@@ -68,14 +68,35 @@ run is recorded `failed` and not reported as a dispatch.
 
 `npm test`: **421 pass, 5 skip, 0 fail**, exit 0.
 
+## Attribution: a completion now needs a run behind it
+
+`graph_mark_node(succeeded)` wrote its **own** `run_finished`, attributed to
+`node.executor?.persona ?? node.completionAuthority` — an expert the caller had merely named.
+So a completion could not be checked against anything: the transition supplied its own
+evidence. Dispatching a node would have been optional, and the journal would still claim an
+explorer did the work.
+
+`src/mission/run-attribution.ts` reads the journal and requires, **before** the transition
+writes anything, that a run was started for this work item and finished successfully — and
+when the node names an executor, that the successful run was performed by that expert. A
+failure may still be reported without a run; refusing to record a failure until something is
+dispatched would be perverse.
+
+Three tests pin it: a completion with no run is refused with the actionable message
+(`… Dispatch the node to its expert with 'dispatch_node' first …`); a completion after a
+dispatch is accepted; a successful run by a **different** expert is refused, naming both the
+node's expert and the one that really ran.
+
+Eight tests completed nodes directly and had to say what did the work. Two now go through
+`dispatch_node`; the rest use a shared helper that records a started-and-finished run, because
+their subject is the success contract, the projection or the event stream rather than dispatch
+itself.
+
 ## Still open
 
-- **An unattributed completion is still accepted.** `graph_mark_node(succeeded)` does not
-  require a matching `run_finished` for the node, so a conductor can complete a node without
-  dispatching anything. Making that a refusal is the other half of Layer 3, and it needs the
-  five tests that mark nodes succeeded directly to be migrated onto dispatch first — which is
-  why it is not bundled here.
 - The isolation test was restructured while verifying this: one test proves the automatic
   drain *fires* (broker, roots), another proves isolation *holds* (the real drain and the real
   BrainStore, in-process, deterministic). Mixing the two made the isolation assertion depend
   on a fire-and-forget timing and fail under a full suite.
+- `dispatch_node` runs read-only experts only. Letting it run writers is a decision about
+  Layer 5 (working without a git worktree), not a gap to close quietly.

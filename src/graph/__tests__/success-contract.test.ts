@@ -10,6 +10,7 @@ import {
 } from "../../mcp/graph-tools.js";
 import { executeConvergeStep } from "../../mcp/orchestration-tools.js";
 import { recordInterview } from "../../mission/interview-gate.js";
+import { recordSuccessfulRun } from "../../mission/__tests__/support/attributed-run.js";
 
 /**
  * A mission cannot be driven before the user has answered and confirmed, so every test
@@ -116,6 +117,9 @@ describe("success contract: no victory without delivered work", () => {
     withWorkspace((root) => {
       executeGraphInit(root, { goal: "g", nodes: [DELIVERABLE_NODE], edges: [] });
       recordConfirmedInterview(root);
+      // A node cannot be completed without a finished run behind it, so the positive
+      // control records the run by the node's own expert before marking it succeeded.
+      recordSuccessfulRun(root, DELIVERABLE_NODE.id, "oma-explorer");
       executeGraphMarkNode(root, { nodeId: "work", state: "succeeded" });
 
       const inspect = executeGraphInspect(root);
@@ -131,6 +135,9 @@ describe("success contract: no victory without delivered work", () => {
     withWorkspace((root) => {
       executeGraphInit(root, { goal: "g", nodes: [DELIVERABLE_NODE], edges: [] });
       recordConfirmedInterview(root);
+      // A node cannot be completed without a finished run behind it, so the positive
+      // control records the run by the node's own expert before marking it succeeded.
+      recordSuccessfulRun(root, DELIVERABLE_NODE.id, "oma-explorer");
       executeGraphMarkNode(root, { nodeId: "work", state: "succeeded" });
 
       // The caller lies: it claims nothing was accepted. The graph disagrees, and
