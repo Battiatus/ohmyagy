@@ -8,6 +8,7 @@ import * as originalParser from "../../test-fixtures/minimal-pipeline/src/parser
 import * as originalPipeline from "../../test-fixtures/minimal-pipeline/src/pipeline.js";
 
 import { MissionResumptionEngine } from "../orchestration/mission-resumption.js";
+import { MockAgyDriver } from "../runtime/mock-driver.js";
 import {
   MissionEventsStore,
   generateDeterministicRunId,
@@ -110,9 +111,15 @@ describe("Phase 5 — Interruption, Reprise & Suivi (Gate Observable)", () => {
       assert.equal(preProj.workGraph.runs[runParser1].status, "running");
 
       // 5. Trigger oma resume via MissionResumptionEngine
+      //
+      // A deterministic driver is injected deliberately. Without one the engine built a
+      // real AgyDriver, so this assertion about *resumption bookkeeping* depended on a
+      // live model call: it took ~21 s against bun's 5 s default and passed only while
+      // the process runner was killing every child within 600 ms (fixed 2026-09-14).
       const result = await MissionResumptionEngine.resume({
         workspaceRoot: testDir,
         missionId,
+        driver: new MockAgyDriver(),
         baseBundle,
         workItemsFixes: {
           [wiMath]: { modulePatch: { math: originalMath }, rawDiffContent: "diff math" },

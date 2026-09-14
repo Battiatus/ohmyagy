@@ -14,7 +14,11 @@ export interface ProcessSpawnOptions {
   stdinInput?: string | Buffer | Uint8Array;
   /** Délai d'expiration maximal en millisecondes avant abattage (0 = pas de timeout) */
   timeoutMs?: number;
-  /** Plafond mémoire en mégaoctets pour le Job Object Windows (optionnel) */
+  /**
+   * Recorded for callers, **not enforced**: no memory ceiling is applied today. It used
+   * to be wired to a Windows Job Object that killed the child instead of limiting it,
+   * so treating it as a guarantee is wrong in both directions.
+   */
   maxMemoryMb?: number;
   /** Plafond de taille en octets pour la capture de stdout/stderr (défaut: 10 Mo) */
   maxBufferBytes?: number;
@@ -98,10 +102,15 @@ export class ProcessRunner {
 
       const pid = child.pid;
 
-      // Configuration Job Object sous Windows
-      if (isWindows && pid) {
-        ProcessRunner.assignToWindowsJobObject(pid, options.maxMemoryMb);
-      }
+      // No Windows Job Object here. The previous implementation created a job with
+      // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE from a fire-and-forget PowerShell process
+      // that exited immediately, so the last job handle closed within a few hundred
+      // milliseconds and Windows terminated the child with exit code 0 and no output.
+      // Every AgyDriver invocation therefore looked like a successful run that produced
+      // nothing (measured 2026-09-14: ProcessRunner returned exitCode 0, empty stdout
+      // and empty stderr in 593 ms for an argv that exits 1 with a JSON error under
+      // spawnSync). The memory limit it was meant to apply was never implemented -- the
+      // parameter was unused -- so the mechanism could only cause harm.
 
       // Armement du Watchdog de Timeout
       let timer: NodeJS.Timeout | null = null;
@@ -267,77 +276,4 @@ export class ProcessRunner {
     }
   }
 
-  /**
-   * Rapprochement et assignation du processus au Job Object sous Windows.
-   */
-  private static assignToWindowsJobObject(pid: number, _maxMemoryMb?: number): void {
-    try {
-      // Commande PowerShell P/Invoke inline configurant KillOnJobClose
-      const psScript = `
-        $code = @'
-        using System;
-        using System.Runtime.InteropServices;
-        public class JobHelper {
-            [DllImport("kernel32.dll", SetLastError=true)]
-            public static extern IntPtr CreateJobObject(IntPtr a, string n);
-            [DllImport("kernel32.dll", SetLastError=true)]
-            public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
-            [DllImport("kernel32.dll", SetLastError=true)]
-            public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr proc);
-            [DllImport("kernel32.dll", SetLastError=true)]
-            public static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint len);
-            [StructLayout(LayoutKind.Sequential)]
-            public struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
-                public long PerProcessUserTimeLimit;
-                public long PerJobUserTimeLimit;
-                public uint LimitFlags;
-                public UIntPtr MinimumWorkingSetSize;
-                public UIntPtr MaximumWorkingSetSize;
-                public uint ActiveProcessLimit;
-                public UIntPtr Affinity;
-                public uint PriorityClass;
-                public uint SchedulingClass;
-            }
-            [StructLayout(LayoutKind.Sequential)]
-            public struct IO_COUNTERS { public ulong r1,r2,r3,r4,r5,r6; }
-            [StructLayout(LayoutKind.Sequential)]
-            public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
-                public JOBOBJECT_BASIC_LIMIT_INFORMATION Basic;
-                public IO_COUNTERS Io;
-                public UIntPtr ProcessMemoryLimit;
-                public UIntPtr JobMemoryLimit;
-                public UIntPtr PeakProcessMemoryUsed;
-                public UIntPtr PeakJobMemoryUsed;
-            }
-            public static bool Configure(int targetPid) {
-                IntPtr hJob = CreateJobObject(IntPtr.Zero, null);
-                if (hJob == IntPtr.Zero) return false;
-                JOBOBJECT_EXTENDED_LIMIT_INFORMATION ext = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
-                ext.Basic.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                int size = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
-                IntPtr pExt = Marshal.AllocHGlobal(size);
-                try {
-                    Marshal.StructureToPtr(ext, pExt, false);
-                    if (!SetInformationJobObject(hJob, 9, pExt, (uint)size)) return false;
-                } finally {
-                    Marshal.FreeHGlobal(pExt);
-                }
-                IntPtr hProc = OpenProcess(0x1F0FFF, false, targetPid);
-                if (hProc == IntPtr.Zero) return false;
-                return AssignProcessToJobObject(hJob, hProc);
-            }
-        }
-'@
-        Add-Type -TypeDefinition $code -Language CSharp
-        [JobHelper]::Configure(${pid})
-      `;
-
-      spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", psScript], {
-        windowsHide: true,
-        stdio: "ignore",
-      }).unref();
-    } catch {
-      // En cas d'indisponibilité de PowerShell, le mécanisme taskkill en fallback reste actif
-    }
-  }
 }

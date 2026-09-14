@@ -264,7 +264,7 @@ export async function drainStagedCapture(
         conversationId,
       );
 
-      await captureInteraction({
+      const capture = await captureInteraction({
         brain: options.brain,
         projectId: project.id,
         sessionId,
@@ -272,6 +272,11 @@ export async function drainStagedCapture(
         text: condensed.text,
         reformulate,
       });
+      // A round that was stored raw because the mini-agent produced nothing is a
+      // degraded capture, and it must be visible rather than counted as a success.
+      if (capture.error !== undefined) {
+        result.errors.push(`${conversationId}: reformulation failed: ${capture.error}`);
+      }
 
       writeStagingCursor(options.workspaceRoot, conversationId, condensed.lastStep);
       result.captured += 1;

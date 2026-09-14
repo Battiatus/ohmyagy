@@ -94,6 +94,12 @@ export async function captureInteraction(params: {
   } catch (error) {
     reformulateError = error instanceof Error ? error.message : String(error);
   }
+  // A null return is the reformulator saying "I produced nothing", not a success. The
+  // raw interaction is still stored, but the round must be marked as unreformulated so
+  // a silently broken mini-agent is visible instead of looking like normal memory.
+  if (summary === null && reformulateError === undefined) {
+    reformulateError = "reformulator returned no summary";
+  }
 
   try {
     const roundNumber = brain.getNextRoundNumber(sessionId);

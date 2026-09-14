@@ -25,7 +25,9 @@ describe('Empirical Benchmark and Oracle Adversarial Challenge', () => {
   };
 
   describe('Challenge 1: Real Clock Timing and Non-Determinism Verification', () => {
-    it('measures real wall-clock durations with non-deterministic jitter across multiple trials', async () => {
+    // Real wall-clock work with a mock driver: the assertion is about jitter, not
+    // speed, so the default 5 s budget only produced load-dependent flakes.
+    it('measures real wall-clock durations with non-deterministic jitter across multiple trials', { timeout: 120_000 }, async () => {
       const testDir = mkdtempSync(join(tmpdir(), 'oma-bench-timing-'));
       try {
         const trialsPerVariant = 5;

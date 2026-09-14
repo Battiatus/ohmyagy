@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { AgyDriver, type IAgyDriver } from "../runtime/agy-driver.js";
 import type { ExpertSpec } from "../runtime/capability-resolver.js";
 import type { Reformulator, StructuredSummary } from "./summarizer.js";
@@ -7,14 +8,62 @@ import { MEMORY_DIMENSIONS, type MemoryDimension } from "./types.js";
  * Gemini Flash reformulator: the compact mini-agent that always passes over an
  * interaction and compresses it into context + actions for the Neural Brain.
  *
- * It runs through the existing {@link AgyDriver} on the `fast` model class
- * (gemini-2.5-flash), read-only, with a tight timeout and low effort — cheap
- * enough to run on every exchange. Any failure returns `null` so the caller
- * falls back to a raw capture; the summarizer must never break the session.
+ * It runs through the existing {@link AgyDriver} on the `fast` model class, read-only,
+ * with a tight timeout and low effort — cheap enough to run on every exchange. Any
+ * failure returns `null` so the caller falls back to a raw capture; the summarizer must
+ * never break the session.
  */
 
-const FLASH_MODEL = "gemini-2.5-flash";
+/** Used only when the CLI cannot be asked. Verified present in AntiGravity 1.2.1. */
+const FALLBACK_FLASH_MODEL = "gemini-3.8-flash-low";
 const DEFAULT_TIMEOUT_MS = 25_000;
+
+let cachedFlashModel: string | undefined;
+
+/**
+ * Which Flash slug to invoke.
+ *
+ * The installed build decides which slugs exist, and they churn. This module used to
+ * hardcode `gemini-2.5-flash`, which is not a known model in AntiGravity 1.2.1 — and
+ * because the process runner also swallowed the child's error, every reformulation
+ * failed silently. Ask the CLI instead of pinning a name that rots.
+ */
+export function resolveFlashModel(): string {
+  const override = process.env.OMA_FLASH_MODEL?.trim();
+  if (override !== undefined && override.length > 0) return override;
+  if (cachedFlashModel !== undefined) return cachedFlashModel;
+  cachedFlashModel = pickFlashModel(listAgyModels()) ?? FALLBACK_FLASH_MODEL;
+  return cachedFlashModel;
+}
+
+/** Prefer the cheapest Flash tier: memory summarisation is not a reasoning task. */
+export function pickFlashModel(slugs: readonly string[]): string | undefined {
+  return (
+    slugs.find((slug) => /flash-low$/u.test(slug)) ??
+    slugs.find((slug) => /flash-medium$/u.test(slug)) ??
+    slugs.find((slug) => /flash-high$/u.test(slug)) ??
+    slugs.find((slug) => slug.includes("flash"))
+  );
+}
+
+/** `agy models` prints `<slug>\t<display name>` per line. Exit status is unreliable. */
+function listAgyModels(): string[] {
+  try {
+    const binary = AgyDriver.resolveAgyBinary();
+    if (binary === undefined || binary.length === 0) return [];
+    const result = spawnSync(binary, ["models"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30_000,
+    });
+    return String(result.stdout ?? "")
+      .split(/\r?\n/u)
+      .map((line) => line.split("\t")[0].trim())
+      .filter((slug) => /^[a-z0-9][a-z0-9.-]*$/u.test(slug));
+  } catch {
+    return [];
+  }
+}
 
 const SUMMARIZER_PERSONA: ExpertSpec = {
   id: "oma-summarizer",
@@ -70,7 +119,7 @@ export function createFlashReformulator(
         persona: SUMMARIZER_PERSONA,
         worktreeDir: options.worktreeDir ?? process.cwd(),
         timeoutMs,
-        modelOverride: FLASH_MODEL,
+        modelOverride: resolveFlashModel(),
         reasoningEffort: "low",
         sandboxMode: "read-only",
         useSandbox: false,
