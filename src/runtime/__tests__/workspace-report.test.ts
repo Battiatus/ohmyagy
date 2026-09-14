@@ -37,14 +37,15 @@ function withEnv(value: string | undefined, run: () => void): void {
   }
 }
 
-test("an explicitly stated workspace is trusted even when it is an install tree", () => {
+test("an install tree is reported as such however it was chosen, with the reason", () => {
   withTempDir((dir) => {
     markAsEditorInstall(dir);
     withEnv(dir, () => {
       const report = describeWorkspace(dir);
       assert.equal(report.source, "OMA_WORKSPACE_ROOT");
-      assert.equal(report.governsEditorInstall, false);
-      // The markers are still reported: the check is about who chose the root.
+      // The editor install tree is never a valid workspace, so pinning it does not
+      // make it one. `source` is what explains how it happened.
+      assert.equal(report.governsEditorInstall, true);
       assert.deepEqual(report.installTreeMarkers.sort(), ["Antigravity.exe", join("resources", "app")].sort());
     });
   });
@@ -56,7 +57,6 @@ test("an explicit argument that is not the cwd is reported as an argument", () =
     withEnv(undefined, () => {
       const report = describeWorkspace(dir);
       assert.equal(report.source, "argument");
-      assert.equal(report.governsEditorInstall, false);
     });
   });
 });

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type StagedTransaction,
   discardStagedTransaction,
@@ -28,7 +29,7 @@ import {
   loadMissionProjection,
   summarizeMission,
 } from "../mission/read-model.js";
-import { OmaDoctor } from "../runtime/doctor.js";
+import { OmaDoctor, describeWorkspace, type WorkspaceReport } from "../runtime/doctor.js";
 import { BrainStore } from "../brain/brain-store.js";
 import {
   BRAIN_SUCCESS_STATUSES,
@@ -69,6 +70,17 @@ export interface BrokerConfig {
   ledgerPath?: string;
   /** Path to the Neural Brain SQLite database. Defaults to `.oma/brain.sqlite`. */
   brainPath?: string;
+  /**
+   * How `workspaceRoot` was chosen. The transport sets `roots/list` after the host
+   * answers, so the report explains a rebound workspace instead of re-inferring
+   * the choice from the process environment.
+   */
+  workspaceRootSource?: WorkspaceReport["source"];
+  /**
+   * True when `OMA_WORKSPACE_ROOT` stated the root. An explicit statement outranks
+   * the host's roots: an operator pin must not be silently overridden.
+   */
+  workspaceRootIsExplicit?: boolean;
 }
 
 /** Lazily open the Neural Brain so servers that never touch it create no file. */
@@ -105,6 +117,43 @@ interface JsonRpcRequest {
   params?: Record<string, unknown>;
 }
 
+/** Anything that can arrive on stdin: a request, a notification, or a reply. */
+interface JsonRpcMessage {
+  jsonrpc?: "2.0";
+  id?: string | number;
+  method?: string;
+  params?: Record<string, unknown>;
+  result?: unknown;
+  error?: { code?: number; message?: string };
+}
+
+/**
+ * How long the broker waits for the host to answer `roots/list`. This is local IPC;
+ * a host that has not answered in five seconds will not answer, and an unresolved
+ * workspace must stay unresolved rather than become a guess.
+ */
+const ROOTS_REQUEST_TIMEOUT_MS = 5_000;
+
+/**
+ * Refuse to serve a session whose workspace is the editor's own installation tree.
+ *
+ * Before this guard the broker answered every tool correctly while reading and
+ * writing another workspace's state, and reported success the whole time. A loud
+ * refusal is the only honest outcome; `doctor` stays reachable so the cause is
+ * visible.
+ */
+function workspaceRefusal(config: BrokerConfig, request: JsonRpcRequest): string | undefined {
+  if (request.method !== "tools/call") return undefined;
+  if (request.params?.name === "doctor") return undefined;
+  const workspace = describeWorkspace(config.workspaceRoot, config.workspaceRootSource);
+  if (!workspace.governsEditorInstall) return undefined;
+  return (
+    `OMA refuses to run: it would govern the editor installation directory (${workspace.root}), not a project. ` +
+    `Root chosen by: ${workspace.source}. Set OMA_WORKSPACE_ROOT to the project root, or let the host answer ` +
+    `MCP 'roots/list'. Call the 'doctor' tool for the full report.`
+  );
+}
+
 export function startMcpBrokerServer(config: BrokerConfig): void {
   const readline = createInterface({ input: process.stdin, terminal: false });
   const missionId = config.missionId ?? "oma-mission";
@@ -129,26 +178,125 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
 
   const stagedRecords = new Map<string, StagedRecord>();
   const getBrain = createBrainAccessor(config);
+  const pendingReplies = new Map<string | number, (message: JsonRpcMessage) => void>();
+  let rootsRequestSeq = 0;
+  let workspaceBinding: Promise<void> | undefined;
 
+  const write = (message: unknown): void => {
+    process.stdout.write(`${JSON.stringify(message)}\n`);
+  };
+
+  const requestRoots = async (): Promise<string[] | undefined> => {
+    rootsRequestSeq += 1;
+    const id = `oma-roots-${rootsRequestSeq}`;
+    const answer = new Promise<JsonRpcMessage>((settle) => pendingReplies.set(id, settle));
+    write({ jsonrpc: "2.0", id, method: "roots/list" });
+    const expired = new Promise<undefined>((settle) => {
+      const timer = setTimeout(() => settle(undefined), ROOTS_REQUEST_TIMEOUT_MS);
+      timer.unref();
+    });
+    const reply = await Promise.race([answer, expired]);
+    pendingReplies.delete(id);
+    if (reply === undefined || !isRecord(reply.result)) return undefined;
+    const { roots } = reply.result;
+    if (!Array.isArray(roots)) return undefined;
+    const paths: string[] = [];
+    for (const entry of roots) {
+      if (!isRecord(entry) || typeof entry.uri !== "string") continue;
+      try {
+        paths.push(resolve(entry.uri.startsWith("file:") ? fileURLToPath(entry.uri) : entry.uri));
+      } catch {
+        // A malformed root is not a root. Never substitute a guess for one.
+      }
+    }
+    return paths;
+  };
+
+  /**
+   * Bind the governed workspace to what the host says it is.
+   *
+   * The editor spawns this server with cwd set to its own installation directory, so
+   * the old fallback gave every project the same workspace — and therefore the same
+   * `projectId`, the same brain and the same mission history. Measured 2026-09-14:
+   * one `projects` row, named "antigravity", holding the Symap mission and an
+   * unrelated session from another workspace.
+   */
+  const bindWorkspaceFromClient = async (): Promise<void> => {
+    const roots = await requestRoots();
+    if (roots === undefined || roots.length === 0) {
+      process.stderr.write(
+        "OMA: the host advertised roots but returned none; the workspace stays unresolved.\n",
+      );
+      return;
+    }
+    const usable = roots.filter((root) => !describeWorkspace(root).governsEditorInstall);
+    if (usable.length !== 1) {
+      process.stderr.write(
+        `OMA: the host returned ${roots.length} usable root(s) (${roots.join(", ")}); refusing to guess which project this session governs.\n`,
+      );
+      return;
+    }
+    config.workspaceRoot = usable[0];
+    config.workspaceRootSource = "roots/list";
+  };
+
+  const clientDeclaresRoots = (request: JsonRpcRequest): boolean => {
+    const capabilities = request.params?.capabilities;
+    return isRecord(capabilities) && isRecord(capabilities.roots);
+  };
+
+  const processLine = async (message: JsonRpcMessage): Promise<void> => {
+    if (message.method === undefined || message.id === undefined) return; // Reply or notification.
+
+    if (message.method === "initialize") {
+      write(handleRequest(config, journal, stagedRecords, message as JsonRpcRequest, getBrain));
+      // The host's own answer about which project this session governs outranks the
+      // cwd the editor happened to spawn us with.
+      if (!config.workspaceRootIsExplicit && clientDeclaresRoots(message as JsonRpcRequest)) {
+        workspaceBinding = bindWorkspaceFromClient();
+        await workspaceBinding;
+      }
+      return;
+    }
+
+    if (workspaceBinding !== undefined) await workspaceBinding;
+
+    const refusal = workspaceRefusal(config, message as JsonRpcRequest);
+    if (refusal !== undefined) {
+      write({ jsonrpc: "2.0", id: message.id, error: { code: -32002, message: refusal } });
+      return;
+    }
+
+    write(handleRequest(config, journal, stagedRecords, message as JsonRpcRequest, getBrain));
+  };
+
+  // Requests are answered in arrival order: binding the workspace is asynchronous,
+  // and a tool call must never overtake the initialize that precedes it. Replies are
+  // handled before the queue — the `roots/list` answer is what the queued initialize
+  // is waiting for, so queueing it would make the handshake wait for itself.
+  let queue: Promise<void> = Promise.resolve();
   readline.on("line", (line) => {
     if (!line.trim()) return;
+    let message: JsonRpcMessage;
     try {
-      const request = JSON.parse(line) as JsonRpcRequest;
-      if (request.id === undefined) {
-        // Notification - do not send response
-        return;
-      }
-      const response = handleRequest(config, journal, stagedRecords, request, getBrain);
-      process.stdout.write(`${JSON.stringify(response)}\n`);
+      message = JSON.parse(line) as JsonRpcMessage;
     } catch (error) {
-      process.stdout.write(
-        `${JSON.stringify({
-          jsonrpc: "2.0",
-          id: null,
-          error: { code: -32700, message: messageOf(error) },
-        })}\n`,
-      );
+      write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: messageOf(error) } });
+      return;
     }
+    if (message.method === undefined) {
+      if (message.id !== undefined) {
+        const settle = pendingReplies.get(message.id);
+        if (settle !== undefined) {
+          pendingReplies.delete(message.id);
+          settle(message);
+        }
+      }
+      return;
+    }
+    queue = queue.then(() => processLine(message)).catch((error: unknown) => {
+      write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: messageOf(error) } });
+    });
   });
 }
 
@@ -494,7 +642,10 @@ function executeListMissions(config: BrokerConfig): Record<string, unknown> {
 }
 
 function executeDoctor(config: BrokerConfig): Record<string, unknown> {
-  return { status: "reported", report: OmaDoctor.diagnoseEnvironment(config.workspaceRoot) };
+  return {
+    status: "reported",
+    report: OmaDoctor.diagnoseEnvironment(config.workspaceRoot, config.workspaceRootSource),
+  };
 }
 
 function executeProposal(
@@ -769,8 +920,14 @@ if (
     }
   }
 
+  // An explicit pin outranks the host's roots; anything else is a guess that the
+  // MCP handshake is expected to replace. The editor spawns stdio servers with cwd
+  // set to its own installation directory, so `process.cwd()` is never a workspace.
+  const explicitWorkspaceRoot = process.env.OMA_WORKSPACE_ROOT;
   startMcpBrokerServer({
-    workspaceRoot: process.env.OMA_WORKSPACE_ROOT || process.cwd(),
+    workspaceRoot: explicitWorkspaceRoot || process.cwd(),
+    workspaceRootIsExplicit:
+      typeof explicitWorkspaceRoot === "string" && explicitWorkspaceRoot.length > 0,
     gates,
     missionId: process.env.OMA_MISSION_ID,
     missionClass: process.env.OMA_MISSION_CLASS,

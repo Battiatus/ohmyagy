@@ -42,7 +42,7 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
         if (report.workspace.governsEditorInstall) {
           console.error(
             `OMA governs the editor installation directory, not a project: ${report.workspace.root}\n` +
-              `No workspace was stated, so the server fell back to its own cwd. Set OMA_WORKSPACE_ROOT (or the MCP 'cwd') to the project root.`,
+              `Root chosen by: ${report.workspace.source}. Set OMA_WORKSPACE_ROOT to the project root, or let the host answer MCP 'roots/list'.`,
           );
           return 1;
         }

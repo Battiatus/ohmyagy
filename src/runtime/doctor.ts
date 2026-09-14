@@ -63,7 +63,7 @@ export interface WorkspaceReport {
   /** Absolute path this instance treats as the workspace root. */
   root: string;
   /** How the root was chosen. Only the first two are explicit. */
-  source: "OMA_WORKSPACE_ROOT" | "argument" | "process.cwd";
+  source: "OMA_WORKSPACE_ROOT" | "roots/list" | "argument" | "process.cwd";
   /**
    * Files that identify this root as an editor installation tree rather than a
    * project. Deliberately not a "does this look like a project" check: a real
@@ -72,12 +72,17 @@ export interface WorkspaceReport {
    */
   installTreeMarkers: string[];
   /**
-   * True when nobody stated a workspace and the fallback landed on an editor
-   * installation tree. Measured 2026-09-11: AntiGravity spawns stdio MCP servers
-   * with cwd set to `%LOCALAPPDATA%\Programs\antigravity`, so
-   * `OMA_WORKSPACE_ROOT || process.cwd()` silently made the editor's own install
-   * directory the governed workspace. Callers must treat this as a failure, not a
-   * warning.
+   * True whenever the governed root is an editor installation tree. Measured
+   * 2026-09-11: AntiGravity spawns stdio MCP servers with cwd set to
+   * `%LOCALAPPDATA%\Programs\antigravity`, so `OMA_WORKSPACE_ROOT || process.cwd()`
+   * silently made the editor's own install directory the governed workspace.
+   * Verified again 2026-09-14: that install tree held the only populated brain —
+   * one `projects` row, named "antigravity", holding both the Symap mission and an
+   * unrelated session from another workspace.
+   *
+   * Reported for every source, including an explicit pin: the editor install tree
+   * is never a valid OMA workspace, whichever way it was chosen. Callers must treat
+   * this as a failure, not a warning.
    */
   governsEditorInstall: boolean;
 }
@@ -163,7 +168,10 @@ const REQUIRED_MCP_TOOLS = [
 ];
 
 export class OmaDoctor {
-  public static diagnoseEnvironment(workspaceRoot = process.cwd()): DoctorReport {
+  public static diagnoseEnvironment(
+    workspaceRoot = process.cwd(),
+    workspaceSource?: WorkspaceReport["source"],
+  ): DoctorReport {
     const isWindows = process.platform === "win32";
 
     // 1. Detect Git
@@ -340,7 +348,7 @@ export class OmaDoctor {
         declaredSkills: Array.from(new Set(declaredSkills)),
         diagnostics,
       },
-      workspace: describeWorkspace(workspaceRoot),
+      workspace: describeWorkspace(workspaceRoot, workspaceSource),
       attestation: buildAttestationReport(workspaceRoot),
     };
   }
@@ -354,11 +362,18 @@ const EDITOR_INSTALL_MARKERS = [
 
 /**
  * Describe the governed workspace without guessing whether it is legitimate.
- * `OMA_WORKSPACE_ROOT` and an explicit argument are trustworthy statements of
- * intent; `process.cwd()` is an assumption, and in this host that assumption
- * resolves to the editor installation directory.
+ * `OMA_WORKSPACE_ROOT`, an MCP `roots/list` answer and an explicit argument are
+ * statements of intent; `process.cwd()` is an assumption, and in this host that
+ * assumption resolves to the editor installation directory.
+ *
+ * `declaredSource` lets a caller that resolved the root itself (the MCP broker,
+ * rebinding from the host's roots) report how, instead of having the choice
+ * re-inferred from the environment.
  */
-export function describeWorkspace(workspaceRoot: string = process.cwd()): WorkspaceReport {
+export function describeWorkspace(
+  workspaceRoot: string = process.cwd(),
+  declaredSource?: WorkspaceReport["source"],
+): WorkspaceReport {
   const root = resolve(workspaceRoot);
   const envRoot = process.env.OMA_WORKSPACE_ROOT;
   const statesRoot =
@@ -367,17 +382,15 @@ export function describeWorkspace(workspaceRoot: string = process.cwd()): Worksp
   const installTreeMarkers = EDITOR_INSTALL_MARKERS.filter((marker) =>
     existsSync(join(root, marker)),
   );
-  const source: WorkspaceReport["source"] = statesRoot
-    ? "OMA_WORKSPACE_ROOT"
-    : isFallback
-      ? "process.cwd"
-      : "argument";
+  const source: WorkspaceReport["source"] =
+    declaredSource ??
+    (statesRoot ? "OMA_WORKSPACE_ROOT" : isFallback ? "process.cwd" : "argument");
 
   return {
     root,
     source,
     installTreeMarkers: [...installTreeMarkers],
-    governsEditorInstall: source === "process.cwd" && installTreeMarkers.length > 0,
+    governsEditorInstall: installTreeMarkers.length > 0,
   };
 }
 
