@@ -73,6 +73,12 @@ were passing on instant child death.
 
 ## Verified
 
+- **The real driver test now passes.** `OMA_REAL_AGY=1 bun test
+  src/runtime/__tests__/agy-driver.real.test.ts` succeeds in 23.7 s:
+  `AgyDriver.invoke` drives the installed binary, returns the parsed structured JSON
+  (`{"ok":true,"answer":42}`), and produces a receipt whose status, exit code, duration
+  and hashes are asserted. It is opt-in by design (`OMA_REAL_AGY=1`) and had simply never
+  been run — which is why the defect survived.
 - The reformulator now returns a real summary (context, actions, and a memory entry
   classified `architectural_decision` with tags) in ~21 s.
 - `src/runtime/__tests__/process-runner.capture.test.ts` pins both properties that were
@@ -82,9 +88,10 @@ were passing on instant child death.
 
 ## Still open
 
-- `AgyDriver.invoke drives the real agy binary` remains skipped. It is the test that
-  would have caught this, and it can now pass; it needs to be re-enabled against a
-  gated, explicit opt-in rather than left permanently skipped.
 - The three suspended engine tests (phase4, phase6, benchmark) are still suspended for
-  the same reason as before — the detached engine emits no graph edges — which is now
-  worth re-examining, since the engine's runs were never real.
+  the same reason as before — the detached engine emits no graph edges — but that verdict
+  is now worth re-examining from scratch, because those engine runs were never real:
+  every model call inside them returned nothing.
+- `phase5` was passing on instant child death. Other tests in the same position may exist:
+  any test whose subject is engine behaviour rather than bookkeeping should be audited for
+  the same accidental dependency.
