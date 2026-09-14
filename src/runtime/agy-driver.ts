@@ -37,6 +37,16 @@ export interface DriverInvocationOptions {
   preserveAgent?: boolean;
 }
 
+/**
+ * How much longer the outer watchdog waits than the `--print-timeout` handed to agy.
+ *
+ * Strictly greater, so agy always gets to report its own timeout as JSON before the
+ * harness kills it. A real dispatch loads a large global context: measured 69 s and 85 s
+ * for a one-line answer, so this is a margin around a genuinely slow operation, not a
+ * workaround for a hang.
+ */
+const WATCHDOG_GRACE_MS = 15_000;
+
 export interface ExecutionReceipt {
   runId: string;
   expertId: string;
@@ -195,7 +205,13 @@ export class AgyDriver implements IAgyDriver {
       args,
       cwd: options.worktreeDir,
       env: options.env,
-      timeoutMs: options.timeoutMs,
+      // The watchdog must outlive agy's own `--print-timeout`, which is set from the same
+      // `options.timeoutMs`. With both equal, the watchdog killed the child at the exact
+      // instant agy would have returned its own timeout as a clean JSON error, so the
+      // driver reported an empty stdout instead of the reason. Measured 2026-09-14: a
+      // role dispatch was killed at 180 651 ms with `--print-timeout 180s` and produced
+      // the empty-string hash.
+      timeoutMs: options.timeoutMs + WATCHDOG_GRACE_MS,
       maxMemoryMb: this.maxMemoryMb,
       onStdoutChunk,
       onStderrChunk,

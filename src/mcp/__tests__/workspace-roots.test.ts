@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -166,7 +166,10 @@ async function waitForSessions(
   const deadline = Date.now() + 120_000;
   let last: BrainSummary = { projects: 0, sessions: 0, roots: [], sessionIds: [] };
   while (Date.now() < deadline) {
-    if (existsSync(brainPath)) {
+    // Never open a database that is still being created: `openDatabase` would create the
+    // file itself, and two writers racing on a fresh SQLite file left the broker's schema
+    // creation ineffective (`no such table: main.interaction_summaries` in the drain).
+    if (existsSync(brainPath) && statSync(brainPath).size > 0) {
       try {
         last = readBrain(brainPath);
         if (last.sessions >= expected) return last;

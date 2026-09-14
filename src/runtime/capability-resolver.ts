@@ -1,3 +1,5 @@
+import { resolveModelForClass } from "./model-catalog.js";
+
 export type VisionRole =
   | "orchestrator"
   | "planner"
@@ -34,10 +36,23 @@ export interface ResolvedCapability {
 }
 
 export class CapabilityResolver {
+  /**
+   * Model class -> slug, resolved against the **installed** build.
+   *
+   * These were hardcoded (`gemini-2.5-flash`, `gemini-3.7-flash`, `gemini-3.7-pro`) and
+   * none of them exists in AntiGravity 1.2.1, so every role dispatch failed while the
+   * process runner reported success. See `model-catalog.ts`.
+   */
   public static readonly DEFAULT_MODELS: Record<"fast" | "balanced" | "frontier", string> = {
-    fast: "gemini-2.5-flash",
-    balanced: "gemini-3.7-flash",
-    frontier: "gemini-3.7-pro",
+    get fast() {
+      return resolveModelForClass("fast");
+    },
+    get balanced() {
+      return resolveModelForClass("balanced");
+    },
+    get frontier() {
+      return resolveModelForClass("frontier");
+    },
   };
 
   public static readonly CORE_EXPERTS: Record<string, ExpertSpec> = {

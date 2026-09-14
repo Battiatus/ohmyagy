@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { installWorkspacePlugin } from "../packaging/install.js";
 import { CapabilityResolver } from "../runtime/capability-resolver.js";
 import { AgyDriver } from "../runtime/agy-driver.js";
+import { readModelCatalog } from "../runtime/model-catalog.js";
 import { evaluateStrictToolUse } from "../strict/policy.js";
 import {
   MissionEventsStore,
@@ -45,9 +46,20 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
   });
 
   it("Gate 1.2: Capability Resolver resolves planner, executor, reviewer into concrete specs", () => {
+    // Model slugs are never asserted as literals here. Pinning them is exactly how the
+    // table rotted: these three lines used to demand `gemini-3.7-pro` / `gemini-3.7-flash`,
+    // which AntiGravity 1.2.1 does not offer, and the green test kept the rot in place
+    // while every dispatch failed. The class is what the role model promises; the slug is
+    // whatever the installed build currently calls it.
+    const catalog = readModelCatalog();
+    const offered = (slug: string, label: string): void => {
+      if (catalog.source === "unavailable") return;
+      assert.ok(catalog.slugs.includes(slug), `${label} resolved to '${slug}', not offered by agy`);
+    };
+
     const plannerCap = CapabilityResolver.resolve("planner");
     assert.equal(plannerCap.agentName, "planner");
-    assert.equal(plannerCap.modelSlug, "gemini-3.7-pro");
+    offered(plannerCap.modelSlug, "planner");
     assert.equal(plannerCap.effort, "high");
     assert.equal(plannerCap.sandbox, "read-only");
     assert.equal(plannerCap.readOnly, true);
@@ -55,7 +67,7 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
 
     const executorCap = CapabilityResolver.resolve("executor");
     assert.equal(executorCap.agentName, "executor");
-    assert.equal(executorCap.modelSlug, "gemini-3.7-flash");
+    offered(executorCap.modelSlug, "executor");
     assert.equal(executorCap.effort, "medium");
     assert.equal(executorCap.sandbox, "workspace-write");
     assert.equal(executorCap.readOnly, false);
@@ -64,9 +76,13 @@ describe("Phase 1 — Transport AntiGravity et MoE Minimal", () => {
 
     const reviewerCap = CapabilityResolver.resolve("reviewer");
     assert.equal(reviewerCap.agentName, "reviewer");
-    assert.equal(reviewerCap.modelSlug, "gemini-3.7-pro");
+    offered(reviewerCap.modelSlug, "reviewer");
     assert.equal(reviewerCap.effort, "high");
     assert.equal(reviewerCap.readOnly, true);
+
+    // Frontier is a stronger class than balanced: the role model is meaningless if every
+    // class collapses onto the same slug.
+    assert.notEqual(plannerCap.modelSlug, executorCap.modelSlug);
   });
 
   it("Gate 1.3: Strict hook permits file mutation inside authorized OMA worktree and denies outside", () => {

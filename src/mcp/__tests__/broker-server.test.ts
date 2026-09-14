@@ -164,7 +164,7 @@ test("installs Antigravity plugin, exposes complete 2PC MCP tools, and enforces 
     assert.notEqual(git(fixture.root, ["rev-parse", "HEAD"]), parent);
     assert.equal(git(fixture.root, ["status", "--porcelain=v1"]), "");
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -210,7 +210,7 @@ test("run_mission and resume_mission operate session-natively without detached p
     assert.equal(nonExistent.isError, true);
     assert.match(nonExistent.content?.[0]?.text ?? "", /Mission 'nonexistent-mission' was not found/);
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -247,7 +247,7 @@ test("observability tools report workspace state without an active mission", () 
     assert.equal(status.isError, true);
     assert.match(String(status.structuredContent.reason), /No active mission/u);
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -259,7 +259,7 @@ test("negotiates AGY's MCP protocol version during initialization", () => {
     const initialized = resultFor(responses, 1);
     assert.equal(initialized.protocolVersion, "2024-11-05");
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -294,7 +294,7 @@ test("T2.3: broker exposes and executes plan_route through MCP stdio protocol", 
     assert.equal(invalidResult.structuredContent.status, "rejected");
     assert.ok(String(invalidResult.structuredContent.reason).includes("plan_route requires a non-empty 'mode' string"));
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -354,7 +354,7 @@ test("self-review (Author == Reviewer) is rejected during promote_change", { tim
     assert.equal(git(fixture.root, ["rev-parse", "HEAD"]), parent);
     assert.equal(readFileSync(join(fixture.root, "a.txt"), "utf8"), "old");
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -388,7 +388,7 @@ test("a failing fixed gate prevents MCP promotion and leaves source unchanged", 
     assert.equal(git(fixture.root, ["rev-parse", "HEAD"]), parent);
     assert.equal(readFileSync(join(fixture.root, "a.txt"), "utf8"), "old");
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -444,7 +444,7 @@ test("the MCP broker rejects proposals targeting plugin and graph authority file
     assert.equal(readFileSync(join(fixture.root, ...protectedPath.split("/")), "utf8"), existing);
     assert.equal(readFileSync(join(fixture.root, ...graphPath.split("/")), "utf8"), "{}\n");
   } finally {
-    rmSync(fixture.container, { recursive: true, force: true });
+    removeTree(fixture.container);
   }
 });
 
@@ -560,6 +560,27 @@ function toolCall(id: number, name: string, args: unknown) {
 
 function nodeGate(id: string, code: string) {
   return { id, program: process.execPath, args: ["-e", code], timeoutMs: 10_000 };
+}
+
+/**
+ * Remove a fixture tree, retrying a transient Windows lock.
+ *
+ * The broker writes OMA's state (brain, graph, missions) into the fixture, and the
+ * database file can still be held for a moment after the process exits. A bare `rmSync`
+ * surfaces that as `EBUSY: resource busy or locked` in teardown — a failure about timing,
+ * not about the behaviour under test. The rest of the suite retries the same way.
+ */
+function removeTree(dir: string): void {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") throw error;
+      Bun.sleepSync(25 * (attempt + 1));
+    }
+  }
 }
 
 function createRepository(withInitialCommit: boolean) {
