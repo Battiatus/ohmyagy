@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import type { BrainStore } from "../brain/brain-store.js";
 import { copyWorkspaceTree } from "../broker/nongit-staging.js";
 import { snapshotWorkspace } from "../broker/workspace-snapshot.js";
 import { loadGraphRuntime } from "../graph/store.js";
@@ -34,6 +35,11 @@ export interface DispatchNodeOptions {
   /** Injectable so a test can prove dispatch without spending a model call. */
   driver?: IAgyDriver;
   timeoutMs?: number;
+  /**
+   * The workspace's Brain, so exploration feeds the durable project model. Optional: a dispatch
+   * without one still runs, it simply does not teach the project anything.
+   */
+  brain?: BrainStore;
 }
 
 export const DISPATCH_TOOL_NAMES = new Set(["dispatch_node"]);
@@ -255,6 +261,8 @@ export async function executeDispatchNode(
   });
 
   const raw = typeof result.rawStdout === "string" ? result.rawStdout : "";
+  const answer = resolveAnswer(result);
+  const modelProblems = recordExploredComponents(options, answer, capability.expertId);
 
   // A writer produced files in the container; turn them into the operations `propose_change`
   // expects, then discard the container. The live workspace was never touched.
@@ -286,7 +294,56 @@ export async function executeDispatchNode(
     output: resolveAnswer(result),
     receipt: result.receipt,
     ...(changeSet !== undefined ? { changeSet } : {}),
+    ...(modelProblems.length > 0 ? { projectModelProblems: modelProblems } : {}),
   };
+}
+
+/**
+ * Feed what the expert actually looked at into the durable project model.
+ *
+ * An exploratory answer names the paths it examined. Recording them is what turns "a mission
+ * read some files" into "the project has these areas, and here is what exploration knows about
+ * each" — knowledge that survives the mission and the process.
+ *
+ * A failure here is reported in the result rather than swallowed: bookkeeping that fails quietly
+ * is how a project model silently stays empty.
+ */
+function recordExploredComponents(
+  options: DispatchNodeOptions,
+  answer: unknown,
+  expertId: string,
+): string[] {
+  if (options.brain === undefined || !isRecord(answer)) return [];
+  const evidence = answer.evidence;
+  if (!Array.isArray(evidence)) return [];
+
+  const summary = typeof answer.summary === "string" ? answer.summary : null;
+  const problems: string[] = [];
+  let project;
+  try {
+    project = options.brain.ensureProject({
+      name: basename(options.workspaceRoot),
+      rootPath: options.workspaceRoot,
+    });
+  } catch (error) {
+    return [messageOf(error)];
+  }
+
+  for (const entry of evidence) {
+    if (typeof entry !== "string" || entry.trim().length === 0) continue;
+    try {
+      options.brain.recordComponent({
+        projectId: project.id,
+        path: entry.trim(),
+        kind: "file",
+        source: `dispatch:${expertId}`,
+        summary,
+      });
+    } catch (error) {
+      problems.push(`${entry}: ${messageOf(error)}`);
+    }
+  }
+  return problems;
 }
 
 /**
@@ -347,4 +404,8 @@ function safeRemove(path: string): void {
   } catch {
     // The OS reaps the temp directory.
   }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

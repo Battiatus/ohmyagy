@@ -7,6 +7,8 @@ import { executeGraphInit, executeGraphMarkNode } from "../graph-tools.js";
 import { executeDispatchNode } from "../dispatch-tools.js";
 import { recordInterview } from "../../mission/interview-gate.js";
 import { recordRun } from "../../mission/__tests__/support/attributed-run.js";
+import { BrainStore } from "../../brain/brain-store.js";
+import { executeBrainTool } from "../brain-tools.js";
 import { readModelCatalog } from "../../runtime/model-catalog.js";
 import { MissionEventsStore } from "../../ledger/mission-events.js";
 import { eventsPathFor } from "../../mission/read-model.js";
@@ -432,6 +434,87 @@ describe("dispatch_node runs the expert the node is assigned to", () => {
         }),
       /assigned to expert 'explorer'[\s\S]*'verifier'/u,
     );
+  });
+
+  it("feeds the durable project model with the areas the expert actually examined", async () => {
+    executeGraphInit(root, { missionId: "m-model", goal: "g", nodes: [explorerNode()], edges: [] });
+    authorise("m-model");
+
+    const brain = new BrainStore(join(root, ".oma", "brain.sqlite"));
+    try {
+      const evidenceDriver: IAgyDriver = {
+        async invoke(options: DriverInvocationOptions): Promise<DriverExecutionResult> {
+          return successResult(
+            options,
+            '{"summary":"the databases are not synchronised","evidence":["src/db/a.ts","src/db/b.ts"],"confidence":"high"}',
+          );
+        },
+      };
+
+      await executeDispatchNode({
+        workspaceRoot: root,
+        input: { nodeId: "explore-db", missionId: "m-model" },
+        driver: evidenceDriver,
+        brain,
+      });
+
+      const project = brain.ensureProject({ name: "x", rootPath: root });
+      const after = brain.listComponents({ projectId: project.id });
+      assert.deepEqual(after.map((component) => component.path).sort(), ["src/db/a.ts", "src/db/b.ts"]);
+      assert.equal(after[0].mentions, 1);
+      assert.equal(after[0].summary, "the databases are not synchronised");
+      assert.match(after[0].source, /^dispatch:/u);
+
+      // A second dispatch mentioning the same area counts the mention instead of duplicating it.
+      await executeDispatchNode({
+        workspaceRoot: root,
+        input: { nodeId: "explore-db", missionId: "m-model" },
+        driver: evidenceDriver,
+        brain,
+      });
+      const again = brain.listComponents({ projectId: project.id });
+      assert.equal(again.length, 2, "an area is upserted by path, not appended");
+      const a = again.find((component) => component.path === "src/db/a.ts");
+      assert.equal(a?.mentions, 2);
+    } finally {
+      brain.close();
+    }
+  });
+
+  it("reports the project model through the brain tool, scoped to the workspace project", async () => {
+    executeGraphInit(root, { missionId: "m-read", goal: "g", nodes: [explorerNode()], edges: [] });
+    authorise("m-read");
+
+    const brain = new BrainStore(join(root, ".oma", "brain.sqlite"));
+    try {
+      const other = brain.ensureProject({ name: "other", rootPath: join(root, "..", "other-project") });
+      brain.recordComponent({ projectId: other.id, path: "not-mine.ts", kind: "file", source: "test" });
+
+      await executeDispatchNode({
+        workspaceRoot: root,
+        input: { nodeId: "explore-db", missionId: "m-read" },
+        driver: {
+          async invoke(options: DriverInvocationOptions): Promise<DriverExecutionResult> {
+            return successResult(
+              options,
+              '{"summary":"scope established","evidence":["src/db/a.ts"],"confidence":"medium"}',
+            );
+          },
+        },
+        brain,
+      });
+
+      const model = executeBrainTool(brain, root, "project_model", {}) as {
+        status: string;
+        count: number;
+        components: Array<{ path: string }>;
+      };
+      assert.equal(model.status, "reported");
+      assert.equal(model.count, 1, "another project's components must not leak into this one");
+      assert.equal(model.components[0].path, "src/db/a.ts");
+    } finally {
+      brain.close();
+    }
   });
 
   it("records a failed run as failed instead of reporting a dispatch", async () => {

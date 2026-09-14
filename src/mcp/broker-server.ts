@@ -336,6 +336,7 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
         const dispatched = await executeDispatchNode({
           workspaceRoot: config.workspaceRoot,
           input: message.params?.arguments,
+          brain: getBrain(),
         });
         write({
           jsonrpc: "2.0",

@@ -22,6 +22,7 @@ export const BRAIN_TOOL_NAMES = new Set([
   "brain_query",
   "brain_summarize",
   "brain_compact",
+  "project_model",
 ]);
 
 /** Result statuses the broker must treat as success (not JSON-RPC errors). */
@@ -30,6 +31,7 @@ export const BRAIN_SUCCESS_STATUSES = new Set([
   "queried",
   "summarized",
   "compacted",
+  "reported",
 ]);
 
 
@@ -168,6 +170,25 @@ export const BRAIN_TOOL_DEFINITIONS = [
         vacuum: {
           type: "boolean",
           description: "Whether to execute SQLite VACUUM to reclaim space after pruning. Default: true.",
+        },
+      },
+    },
+  },
+  {
+    name: "project_model",
+    description:
+      "Read the durable shape of the project: which areas exploration has looked at, how often, and the most recent thing learned about each. Accumulated across missions and sessions, so a new session starts from what is already known instead of rediscovering it. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          description: "Target project id. Defaults to the current workspace project.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum components to return, most recently seen first. Default: 20.",
+          minimum: 1,
         },
       },
     },
@@ -453,8 +474,40 @@ export function executeBrainTool(
       return executeSummarize(brain, workspaceRoot, args);
     case "brain_compact":
       return executeCompact(brain, workspaceRoot, args);
+    case "project_model":
+      return executeProjectModel(brain, workspaceRoot, args);
     default:
       throw new Error(`Unknown brain tool: ${toolName}`);
   }
+}
+
+/**
+ * The durable shape of the project: which areas exploration has actually looked at, how often,
+ * and the most recent thing learned about each.
+ *
+ * Scoped to the workspace's own project, like every other Brain read.
+ */
+function executeProjectModel(
+  brain: BrainStore,
+  workspaceRoot: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const project = resolveProject(brain, workspaceRoot, args);
+  const limit = typeof args.limit === "number" ? args.limit : undefined;
+  const components = brain.listComponents({ projectId: project.id, ...(limit !== undefined ? { limit } : {}) });
+  return {
+    status: "reported",
+    projectId: project.id,
+    projectName: project.name,
+    components: components.map((component) => ({
+      path: component.path,
+      kind: component.kind,
+      summary: component.summary,
+      mentions: component.mentions,
+      source: component.source,
+      lastSeenAt: component.lastSeenAt,
+    })),
+    count: components.length,
+  };
 }
 

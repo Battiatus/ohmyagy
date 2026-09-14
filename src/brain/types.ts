@@ -42,6 +42,35 @@ export interface ProjectRecord {
   updatedAt: number;
 }
 
+/**
+ * One area of the project, as opposed to one thing that happened in it.
+ *
+ * Memory entries are episodic — a decision, an error, a run. Components are the project's shape:
+ * which paths exploration has actually looked at, how often, and the most recent thing learned
+ * about each. They are what makes the vision's "complete view of the project" survive a restart
+ * instead of being rediscovered by every mission.
+ */
+export interface ProjectComponentRecord {
+  id: string;
+  projectId: string;
+  /** Workspace-relative, POSIX separators. */
+  path: string;
+  kind: string;
+  summary: string | null;
+  source: string;
+  mentions: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+}
+
+export interface RecordComponentInput {
+  projectId: string;
+  path: string;
+  kind: string;
+  source: string;
+  summary?: string | null;
+}
+
 /** A single OMA working session scoped to one project. */
 export interface SessionRecord {
   id: string;

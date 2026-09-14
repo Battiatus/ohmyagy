@@ -9,8 +9,10 @@ import {
   type InteractionSummary,
   type MemoryDimension,
   type MemoryEntry,
+  type ProjectComponentRecord,
   type ProjectRecord,
   type QueryMemoryInput,
+  type RecordComponentInput,
   type RecordInteractionInput,
   type SessionRecord,
   type StartSessionInput,
@@ -95,6 +97,27 @@ CREATE INDEX IF NOT EXISTS idx_mem_project_dim ON memory_entries(project_id, dim
 CREATE INDEX IF NOT EXISTS idx_mem_session ON memory_entries(session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_session ON interaction_summaries(session_id);
+
+-- The project's shape, as opposed to what happened in it.
+--
+-- Memory entries are episodic: a decision, an error, a run. The vision asks for a complete and
+-- durable view of the project itself — which areas it is made of, and what exploration has
+-- learned about each — that survives a restart and accumulates across missions instead of being
+-- rediscovered every time.
+CREATE TABLE IF NOT EXISTS project_components (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    summary TEXT,
+    source TEXT NOT NULL,
+    mentions INTEGER NOT NULL DEFAULT 1,
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    UNIQUE(project_id, path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_components_project ON project_components(project_id, last_seen_at);
 `;
 
 interface ProjectRow {
@@ -137,6 +160,32 @@ interface InteractionRow {
   outcome: string | null;
   node_ref: string | null;
   created_at: number;
+}
+
+interface ProjectComponentRow {
+  id: string;
+  project_id: string;
+  path: string;
+  kind: string;
+  summary: string | null;
+  source: string;
+  mentions: number;
+  first_seen_at: number;
+  last_seen_at: number;
+}
+
+function mapComponentRow(row: ProjectComponentRow): ProjectComponentRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    path: row.path,
+    kind: row.kind,
+    summary: row.summary,
+    source: row.source,
+    mentions: row.mentions,
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+  };
 }
 
 /**
@@ -395,6 +444,74 @@ export class BrainStore {
       .prepare("DELETE FROM memory_entries WHERE id = ?")
       .run(id);
     return Number(result.changes) > 0;
+  }
+
+  /**
+   * Record one area of the project, upserting by path.
+   *
+   * Exploration is what teaches OMA the shape of a project, and exploration happens per mission.
+   * Without a durable component list each mission rediscovers the same ground and the knowledge
+   * dies with the graph. `mentions` is how often exploration has touched the area, `summary` the
+   * most recent thing learned about it.
+   */
+  recordComponent(input: RecordComponentInput): ProjectComponentRecord {
+    const projectId = requireNonEmpty(input.projectId, "projectId");
+    if (!this.getProject(projectId)) {
+      throw new BrainStoreError("NOT_FOUND", `Unknown project '${projectId}'`);
+    }
+    const path = requireNonEmpty(input.path, "path").replace(/\\/gu, "/");
+    const kind = requireNonEmpty(input.kind, "kind");
+    const source = requireNonEmpty(input.source, "source");
+    const now = Date.now();
+    // `bun:sqlite` returns null for no row where `node:sqlite` returns undefined; the adapter's
+    // signature says undefined, so normalise here rather than trusting either.
+    const existing =
+      this.db
+        .prepare("SELECT * FROM project_components WHERE project_id = ? AND path = ?")
+        .get<ProjectComponentRow>(projectId, path) ?? undefined;
+
+    if (existing === undefined) {
+      const id = randomUUID();
+      this.db
+        .prepare(
+          `INSERT INTO project_components
+             (id, project_id, path, kind, summary, source, mentions, first_seen_at, last_seen_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(id, projectId, path, kind, input.summary ?? null, source, now, now);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE project_components
+              SET kind = ?, summary = COALESCE(?, summary), source = ?, mentions = mentions + 1, last_seen_at = ?
+            WHERE id = ?`,
+        )
+        .run(kind, input.summary ?? null, source, now, existing.id);
+    }
+
+    const row =
+      this.db
+        .prepare("SELECT * FROM project_components WHERE project_id = ? AND path = ?")
+        .get<ProjectComponentRow>(projectId, path) ?? undefined;
+    if (row === undefined) {
+      throw new BrainStoreError("CONSTRAINT_ERROR", `Component '${path}' could not be read back`);
+    }
+    return mapComponentRow(row);
+  }
+
+  /** The project's areas, most recently touched first. Strictly scoped to the project. */
+  listComponents(input: { projectId: string; limit?: number }): ProjectComponentRecord[] {
+    const projectId = requireNonEmpty(input.projectId, "projectId");
+    const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_QUERY_LIMIT), MAX_QUERY_LIMIT);
+    return this.db
+      .prepare(
+        `SELECT * FROM project_components
+          WHERE project_id = ?
+          ORDER BY last_seen_at DESC, path ASC
+          LIMIT ?`,
+      )
+      .all<ProjectComponentRow>(projectId, limit)
+      .map(mapComponentRow);
   }
 
   /**
