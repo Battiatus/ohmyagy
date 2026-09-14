@@ -1,0 +1,541 @@
+{
+  "archivedAt": "2026-09-14T11:27:18.964Z",
+  "source": "C:\\Users\\User\\AppData\\Local\\Programs\\antigravity\\.oma\\brain.sqlite",
+  "reason": "Every IDE session read this brain because the broker resolved its workspace to the editor installation directory. One projects row, named 'antigravity', holds sessions from unrelated workspaces.",
+  "projects": [
+    {
+      "id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "name": "antigravity",
+      "root_path": "C:\\Users\\User\\AppData\\Local\\Programs\\antigravity",
+      "tech_stack": null,
+      "created_at": 1789144565409,
+      "updated_at": 1789376851783
+    }
+  ],
+  "sessions": [
+    {
+      "id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "started_at": 1789144873560,
+      "last_active_at": 1789144873560,
+      "objective": "Mission mission-1789144666489",
+      "status": "active"
+    },
+    {
+      "id": "5656f255-d6a1-43e0-ac8e-6825b569b046",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "started_at": 1789145081857,
+      "last_active_at": 1789145081857,
+      "objective": null,
+      "status": "active"
+    },
+    {
+      "id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "started_at": 1789376314793,
+      "last_active_at": 1789376314793,
+      "objective": "Mission mission_audit_v2",
+      "status": "active"
+    }
+  ],
+  "memoryEntries": [
+    {
+      "id": "70a27608ae688996f63bbc982747e2957b6c0bcc98981bb8fed11f9d1960aeb2",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node bootstrap: Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique",
+      "content": "Work item 'Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique' [node: bootstrap] reached state 'accepted'. Scope: none. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"bootstrap\",\"node:bootstrap\",\"mission:mission-1789144666489\",\"accepted\"]",
+      "confidence": 1,
+      "created_at": 1789144873567,
+      "updated_at": 1789376851791
+    },
+    {
+      "id": "fde8e1bb4990806443f98c5c2954c604909355d07476405bd95717e5c09c439f",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node explore_arch: Audit de l'architecture globale et du statut de la solution",
+      "content": "Work item 'Audit de l'architecture globale et du statut de la solution' [node: explore_arch] reached state 'accepted'. Scope: none. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"explore_arch\",\"node:explore_arch\",\"mission:mission-1789144666489\",\"accepted\"]",
+      "confidence": 1,
+      "created_at": 1789144873578,
+      "updated_at": 1789376851802
+    },
+    {
+      "id": "b4ef12efe4fecd9ee51276fc4408f88f11dcca7219ece93cbd4b41ff38cba45e",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node explore_dbs: Audit des bases de données, ORM, synchronisation et schéma",
+      "content": "Work item 'Audit des bases de données, ORM, synchronisation et schéma' [node: explore_dbs] reached state 'accepted'. Scope: none. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"explore_dbs\",\"node:explore_dbs\",\"mission:mission-1789144666489\",\"accepted\"]",
+      "confidence": 1,
+      "created_at": 1789144873588,
+      "updated_at": 1789376851813
+    },
+    {
+      "id": "699f3e84d054f15cfb20ab10a3c819a534394b2eff9a979a278c9c6096f587d3",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node explore_debt: Audit approfondi de la dette technique",
+      "content": "Work item 'Audit approfondi de la dette technique' [node: explore_debt] reached state 'accepted'. Scope: none. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"explore_debt\",\"node:explore_debt\",\"mission:mission-1789144666489\",\"accepted\"]",
+      "confidence": 1,
+      "created_at": 1789144873600,
+      "updated_at": 1789376851821
+    },
+    {
+      "id": "727e100564397acb6542f296d8a5a7268f3b556ab723c38f7f51747f4cb50a07",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node review_synthesis: Synthèse d'audit, stratégie de fusion et rapport complet",
+      "content": "Work item 'Synthèse d'audit, stratégie de fusion et rapport complet' [node: review_synthesis] reached state 'accepted'. Scope: none. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"review_synthesis\",\"node:review_synthesis\",\"mission:mission-1789144666489\",\"accepted\"]",
+      "confidence": 1,
+      "created_at": 1789144873612,
+      "updated_at": 1789376851831
+    },
+    {
+      "id": "bde8cc6ed4390d07de7853d714cefca732cd091fed1f726feccbfbd9d215f341",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Mission mission-1789144666489: blocked",
+      "content": "Mission 'mission-1789144666489' completed with status 'blocked' at wave 4. Total events: 39. Accepted items: 5/8. Visible tests passing: 0.",
+      "tags": "[\"run_summary\",\"mission_overview\",\"mission:mission-1789144666489\",\"blocked\"]",
+      "confidence": 1,
+      "created_at": 1789144873651,
+      "updated_at": 1789376851941
+    },
+    {
+      "id": "3ea23c2e870b17f926fff19d3b9feedeae51ced948cacb32a1aa430e2be96c15",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "past_error",
+      "title": "Gate failure: objective-judge-gate",
+      "content": "Gate 'objective-judge-gate' failed during mission 'mission-1789144666489'. Diagnostics: 2 node(s) ready for execution.",
+      "tags": "[\"past_error\",\"gate_failure\",\"objective-judge-gate\",\"mission:mission-1789144666489\"]",
+      "confidence": 1,
+      "created_at": 1789144959469,
+      "updated_at": 1789376851952
+    },
+    {
+      "id": "68a5c24697ba3c772c1166049f1f060db911ebb504b8f8240bde30fc7a31917d",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "past_error",
+      "title": "Gate failure: objective-judge-gate",
+      "content": "Gate 'objective-judge-gate' failed during mission 'mission-1789144666489'. Diagnostics: 1 node(s) ready for execution.",
+      "tags": "[\"past_error\",\"gate_failure\",\"objective-judge-gate\",\"mission:mission-1789144666489\"]",
+      "confidence": 1,
+      "created_at": 1789145049928,
+      "updated_at": 1789376851957
+    },
+    {
+      "id": "5624546b-87b3-40d2-a0fc-d7c83c710b01",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "5656f255-d6a1-43e0-ac8e-6825b569b046",
+      "dimension": "run_summary",
+      "title": "Round 0 summary",
+      "content": "Audit complet de Symap et AgentsHub : solution fonctionnelle mais scindée en deux systèmes disjoints. Aucune synchronisation entre BigQuery (Symap) et Firestore (AgentsHub). Stratégie de fusion articulée autour de l'unification d'identité Firebase et la séparation OLTP (Firestore/Postgres) / OLAP (BigQuery). Dette technique majeure sur BigQuery OLTP, tables sharded par jour, injection SQL, God Objects et failles HMAC.",
+      "tags": "[]",
+      "confidence": 1,
+      "created_at": 1789145081870,
+      "updated_at": 1789145081870
+    },
+    {
+      "id": "b3f002bb-204d-4685-96a8-24ee964fafdb",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": null,
+      "dimension": "architectural_decision",
+      "title": "Persistance et Stratégie de Fusion Symap / AgentsHub",
+      "content": "Symap utilise BigQuery comme base de persistance applicative (dataset bqbot) avec des tables sharded par jour (flow_*, etc.), tandis qu'AgentsHub utilise Firestore (users, sessions). Aucune synchronisation n'existe entre les deux. La cible de fusion requiert d'unifier l'authentification Firebase et d'adopter Firestore (ou PostgreSQL) pour le transactionnel (OLTP) tout en réservant BigQuery à l'analytique (OLAP).",
+      "tags": "[]",
+      "confidence": 1,
+      "created_at": 1789145096595,
+      "updated_at": 1789145096595
+    },
+    {
+      "id": "002b56bdbbdf6c2ce4a250e40add37365c9edfebe2798658b53e47e567b67b1c",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "past_error",
+      "title": "Gate failure: objective-judge-gate",
+      "content": "Gate 'objective-judge-gate' failed during mission 'mission-1789144666489'. Diagnostics: In progress: awaiting next wave or node transitions.",
+      "tags": "[\"past_error\",\"gate_failure\",\"objective-judge-gate\",\"mission:mission-1789144666489\"]",
+      "confidence": 1,
+      "created_at": 1789376306972,
+      "updated_at": 1789376851968
+    },
+    {
+      "id": "abae3457b519c09a23042a3dc40dbffbfffb8bbddbc5dfccc885cccb466c0b7e",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "dimension": "run_summary",
+      "title": "Mission mission_audit_v2: in_progress",
+      "content": "Mission 'mission_audit_v2' completed with status 'in_progress' at wave 1. Total events: 3. Accepted items: 0/0. Visible tests passing: 0.",
+      "tags": "[\"run_summary\",\"mission_overview\",\"mission:mission_audit_v2\",\"in_progress\"]",
+      "confidence": 1,
+      "created_at": 1789376314856,
+      "updated_at": 1789376314856
+    },
+    {
+      "id": "40df808524b6a1b2a3c50d241287c4bac9dbaaab65f6c8781cfe48c1cab333d2",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "dimension": "past_error",
+      "title": "Gate failure: objective-judge-gate",
+      "content": "Gate 'objective-judge-gate' failed during mission 'mission_audit_v2'. Diagnostics: In progress: awaiting next wave or node transitions.",
+      "tags": "[\"past_error\",\"gate_failure\",\"objective-judge-gate\",\"mission:mission_audit_v2\"]",
+      "confidence": 1,
+      "created_at": 1789376314864,
+      "updated_at": 1789376314864
+    },
+    {
+      "id": "a980d3a0d08bc03683d2f9c67b2b6ae0b2683a8805e3b79388c88ee6bf21180f",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node diag_explore_symap: Exploration approfondie du code Symap pour auditer le statut réel et extraire des preuves",
+      "content": "Work item 'Exploration approfondie du code Symap pour auditer le statut réel et extraire des preuves' [node: diag_explore_symap] reached state 'pending'. Scope: Dépôt de Symap. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"diag_explore_symap\",\"node:diag_explore_symap\",\"mission:mission-1789144666489\",\"pending\"]",
+      "confidence": 0.85,
+      "created_at": 1789376844222,
+      "updated_at": 1789376851841
+    },
+    {
+      "id": "ef565f8d4a7f40683a95f3df4c4ee81319d3e01fbdaea578d9024c9026bbec20",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node diag_explore_agentshub: Exploration approfondie du code AgentsHub pour auditer le statut réel et extraire des preuves",
+      "content": "Work item 'Exploration approfondie du code AgentsHub pour auditer le statut réel et extraire des preuves' [node: diag_explore_agentshub] reached state 'pending'. Scope: Dépôt d'AgentsHub. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"diag_explore_agentshub\",\"node:diag_explore_agentshub\",\"mission:mission-1789144666489\",\"pending\"]",
+      "confidence": 0.85,
+      "created_at": 1789376844233,
+      "updated_at": 1789376851851
+    },
+    {
+      "id": "dc77473a7a68d930782ba7e4a0d49dcc399ce29c189fe910c3870982572f5607",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Node diag_review_synthesis: Synthèse et challenge croisé de la vision Symap/AgentsHub basée sur les preuves du code",
+      "content": "Work item 'Synthèse et challenge croisé de la vision Symap/AgentsHub basée sur les preuves du code' [node: diag_review_synthesis] reached state 'pending'. Scope: Résultats des explorations Symap et AgentsHub. Produced artifacts: none. Diff digest: none.",
+      "tags": "[\"run_summary\",\"work_item\",\"diag_review_synthesis\",\"node:diag_review_synthesis\",\"mission:mission-1789144666489\",\"pending\"]",
+      "confidence": 0.85,
+      "created_at": 1789376844244,
+      "updated_at": 1789376851861
+    },
+    {
+      "id": "4a3c962354ce5a723a5c8ec33b6e0b94afc27071535e18b37fe4a059b9fe99f9",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Graph node bootstrap: Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique",
+      "content": "Graph node 'Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique' [node: bootstrap] state is 'succeeded'. Scope: none.",
+      "tags": "[\"run_summary\",\"graph_node\",\"bootstrap\",\"node:bootstrap\",\"mission:mission-1789144666489\",\"succeeded\"]",
+      "confidence": 1,
+      "created_at": 1789376844256,
+      "updated_at": 1789376851870
+    },
+    {
+      "id": "8a6130b618d7ad5cf9b1fd008359676bbdf48b19486574af2c2d0e836e40627f",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Graph node explore_arch: Audit de l'architecture globale et du statut de la solution",
+      "content": "Graph node 'Audit de l'architecture globale et du statut de la solution' [node: explore_arch] state is 'succeeded'. Scope: none.",
+      "tags": "[\"run_summary\",\"graph_node\",\"explore_arch\",\"node:explore_arch\",\"mission:mission-1789144666489\",\"succeeded\"]",
+      "confidence": 1,
+      "created_at": 1789376844282,
+      "updated_at": 1789376851897
+    },
+    {
+      "id": "81fe7c8ccb7e6d6e388ce2ca7a5a4ba0c6742ba10f3e959cacbc5c80481e8a53",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Graph node explore_dbs: Audit des bases de données, ORM, synchronisation et schéma",
+      "content": "Graph node 'Audit des bases de données, ORM, synchronisation et schéma' [node: explore_dbs] state is 'succeeded'. Scope: none.",
+      "tags": "[\"run_summary\",\"graph_node\",\"explore_dbs\",\"node:explore_dbs\",\"mission:mission-1789144666489\",\"succeeded\"]",
+      "confidence": 1,
+      "created_at": 1789376844295,
+      "updated_at": 1789376851909
+    },
+    {
+      "id": "17ee988991a2d81ab297a17577236ca4f098df08ae9041023945503fa6549766",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Graph node explore_debt: Audit approfondi de la dette technique",
+      "content": "Graph node 'Audit approfondi de la dette technique' [node: explore_debt] state is 'succeeded'. Scope: none.",
+      "tags": "[\"run_summary\",\"graph_node\",\"explore_debt\",\"node:explore_debt\",\"mission:mission-1789144666489\",\"succeeded\"]",
+      "confidence": 1,
+      "created_at": 1789376844306,
+      "updated_at": 1789376851918
+    },
+    {
+      "id": "d71b2cfda1c82002b695569b814f0be6dffd22660da04d0a2f5cfd75d69e617c",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "run_summary",
+      "title": "Graph node review_synthesis: Synthèse d'audit, stratégie de fusion et rapport complet",
+      "content": "Graph node 'Synthèse d'audit, stratégie de fusion et rapport complet' [node: review_synthesis] state is 'succeeded'. Scope: none.",
+      "tags": "[\"run_summary\",\"graph_node\",\"review_synthesis\",\"node:review_synthesis\",\"mission:mission-1789144666489\",\"succeeded\"]",
+      "confidence": 1,
+      "created_at": 1789376844316,
+      "updated_at": 1789376851927
+    },
+    {
+      "id": "28a88c5c86873ac583d774a3386d534d8572b1c0b3777b2c398e38f3c1caff96",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "past_error",
+      "title": "Gate failure: objective-judge-gate",
+      "content": "Gate 'objective-judge-gate' failed during mission 'mission-1789144666489'. Diagnostics: Round budget exhausted: 5 rounds reached maxRounds limit of 5.",
+      "tags": "[\"past_error\",\"gate_failure\",\"objective-judge-gate\",\"mission:mission-1789144666489\"]",
+      "confidence": 1,
+      "created_at": 1789376844357,
+      "updated_at": 1789376851972
+    },
+    {
+      "id": "945608ed576800ce5f14d187b61155f2d4f5475616a126eeed143406cf053b73",
+      "project_id": "228bacba-851b-4e4b-a50c-520089555f62",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "dimension": "past_error",
+      "title": "Gate failure: objective-judge-gate",
+      "content": "Gate 'objective-judge-gate' failed during mission 'mission-1789144666489'. Diagnostics: Stagnation detected: 2 consecutive rounds without measurable progress.",
+      "tags": "[\"past_error\",\"gate_failure\",\"objective-judge-gate\",\"mission:mission-1789144666489\"]",
+      "confidence": 1,
+      "created_at": 1789376851977,
+      "updated_at": 1789376851977
+    }
+  ],
+  "interactionSummaries": [
+    {
+      "id": "0045a66f05836d6ba2b1bce432b3aea7a46af7065a7588cf9fb61bb1074699b7",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 2,
+      "user_intent": "Execute node bootstrap: Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique",
+      "actions_taken": "Work item in state 'accepted'. Assigned expert: scheduler. Scope: none.",
+      "outcome": "State: accepted",
+      "node_ref": "bootstrap",
+      "created_at": 1789144873573
+    },
+    {
+      "id": "8e0304a9ee5039115f19c2a8516979dcf96e34ff5c865597a5181372d3b014c8",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 3,
+      "user_intent": "Execute node explore_arch: Audit de l'architecture globale et du statut de la solution",
+      "actions_taken": "Work item in state 'accepted'. Assigned expert: oma-explorer. Scope: none.",
+      "outcome": "State: accepted",
+      "node_ref": "explore_arch",
+      "created_at": 1789144873582
+    },
+    {
+      "id": "d0297c2d70b4dc7920a71e6289423acb7745da2971e9efff9eb01242fc276074",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 4,
+      "user_intent": "Execute node explore_dbs: Audit des bases de données, ORM, synchronisation et schéma",
+      "actions_taken": "Work item in state 'accepted'. Assigned expert: oma-explorer. Scope: none.",
+      "outcome": "State: accepted",
+      "node_ref": "explore_dbs",
+      "created_at": 1789144873594
+    },
+    {
+      "id": "70cc8d0e1a7f69ac1f1eaf4987a2cc79089194a90df0d80667b28554c253ad97",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 5,
+      "user_intent": "Execute node explore_debt: Audit approfondi de la dette technique",
+      "actions_taken": "Work item in state 'accepted'. Assigned expert: oma-explorer. Scope: none.",
+      "outcome": "State: accepted",
+      "node_ref": "explore_debt",
+      "created_at": 1789144873606
+    },
+    {
+      "id": "13692873dc92ece085d597745f178988588f7ba7a21ff176f30ae2f24837b8f7",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 6,
+      "user_intent": "Execute node review_synthesis: Synthèse d'audit, stratégie de fusion et rapport complet",
+      "actions_taken": "Work item in state 'accepted'. Assigned expert: oma-reviewer. Scope: none.",
+      "outcome": "State: accepted",
+      "node_ref": "review_synthesis",
+      "created_at": 1789144873618
+    },
+    {
+      "id": "715d97dbe89439dbf46a7a501c6bb5d20f490f31d0e95d6fa761b7693f329c4b",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 2,
+      "user_intent": "Execute graph node bootstrap: Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "bootstrap",
+      "created_at": 1789144873629
+    },
+    {
+      "id": "8e86621411e4d865b08a15f6bb29fb364fc5303f9351571e3440fdebf3787257",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 6,
+      "user_intent": "Execute graph node explore_arch: Audit de l'architecture globale et du statut de la solution",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "explore_arch",
+      "created_at": 1789144873634
+    },
+    {
+      "id": "0c4c9aec204e9e6675b9ed8fb2ee7a5cffb97bfbb5d3ff754adaa5a1f9c70e79",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 7,
+      "user_intent": "Execute graph node explore_dbs: Audit des bases de données, ORM, synchronisation et schéma",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "explore_dbs",
+      "created_at": 1789144873638
+    },
+    {
+      "id": "347afe01051c67bdd41edcaa91c82be8d3673ceaab57a25b93180efe7ed25593",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 8,
+      "user_intent": "Execute graph node explore_debt: Audit approfondi de la dette technique",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "explore_debt",
+      "created_at": 1789144873642
+    },
+    {
+      "id": "c7e0b5e44bf5e0f5b2fd3ecd939c20c5ba5dcc2022170173e589acbf7de969ed",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 9,
+      "user_intent": "Execute graph node review_synthesis: Synthèse d'audit, stratégie de fusion et rapport complet",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "review_synthesis",
+      "created_at": 1789144873646
+    },
+    {
+      "id": "2955acb8-b9dc-42ca-ae82-4e5305f877df",
+      "session_id": "5656f255-d6a1-43e0-ac8e-6825b569b046",
+      "round_number": 0,
+      "user_intent": "Audit approfondi de la solution Symap : statut global, synchronisation et fusion des bases de données, analyse de la dette technique.",
+      "actions_taken": "Exécution d'une mission d'audit diagnostique OMA (Kahn DAG à 5 nœuds). Cartographie exhaustive des dépôts Symap et AgentsHub, analyse de la persistance (BigQuery sharded vs Firestore), validation de l'absence de synchronisation, conception de la stratégie de fusion en 4 étapes et matrice de dette technique cotée.",
+      "outcome": "Mission accomplie avec succès. Rapport complet d'audit architectural livré.",
+      "node_ref": null,
+      "created_at": 1789145081864
+    },
+    {
+      "id": "f2d57ab28f6370b49e2b743f6f62edd51631bc13e2a6704749a2983b3b722080",
+      "session_id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "round_number": 1,
+      "user_intent": "Execute graph node bootstrap: Audit approfondi de la solution Symap : statut global, synchronisation et stratégie de fusion des bases de données, cartographie de la dette technique",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "bootstrap",
+      "created_at": 1789376314806
+    },
+    {
+      "id": "5b33b42f628d5b21a55a5085db158df5f9b6f7e053ef1ee178243d2e4704e6b1",
+      "session_id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "round_number": 2,
+      "user_intent": "Execute graph node explore_arch: Audit de l'architecture globale et du statut de la solution",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "explore_arch",
+      "created_at": 1789376314817
+    },
+    {
+      "id": "df9e413e3a70ddf42d2afacaed688d023750e6684d1712a50fea58af4cbef313",
+      "session_id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "round_number": 3,
+      "user_intent": "Execute graph node explore_dbs: Audit des bases de données, ORM, synchronisation et schéma",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "explore_dbs",
+      "created_at": 1789376314829
+    },
+    {
+      "id": "448d27959ef09fdc5da0790387ed65a42368b2ad19bcb7a618f97ff60f2024b9",
+      "session_id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "round_number": 4,
+      "user_intent": "Execute graph node explore_debt: Audit approfondi de la dette technique",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "explore_debt",
+      "created_at": 1789376314840
+    },
+    {
+      "id": "c45871e6f44c8d4082fe9f309f2970a9905039212d98aee0df8ae9020ccf7a85",
+      "session_id": "543f421a-e893-41b7-8c8a-40269c7e3835",
+      "round_number": 5,
+      "user_intent": "Execute graph node review_synthesis: Synthèse d'audit, stratégie de fusion et rapport complet",
+      "actions_taken": "Graph node reached state 'succeeded'. Scope: none.",
+      "outcome": "State: succeeded",
+      "node_ref": "review_synthesis",
+      "created_at": 1789376314850
+    },
+    {
+      "id": "96f717eaad410f2d68ffaacd9c9593fef895230bba4c35d2118c30fe7919adbf",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 7,
+      "user_intent": "Execute node diag_explore_symap: Exploration approfondie du code Symap pour auditer le statut réel et extraire des preuves",
+      "actions_taken": "Work item in state 'pending'. Assigned expert: executor. Scope: Dépôt de Symap.",
+      "outcome": "State: pending",
+      "node_ref": "diag_explore_symap",
+      "created_at": 1789376844227
+    },
+    {
+      "id": "a509f19705f592ccb1cc1ff1033dc566902422b74d64ac212768ee04e7ed99d6",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 8,
+      "user_intent": "Execute node diag_explore_agentshub: Exploration approfondie du code AgentsHub pour auditer le statut réel et extraire des preuves",
+      "actions_taken": "Work item in state 'pending'. Assigned expert: executor. Scope: Dépôt d'AgentsHub.",
+      "outcome": "State: pending",
+      "node_ref": "diag_explore_agentshub",
+      "created_at": 1789376844239
+    },
+    {
+      "id": "8cd74f6492f53b6b1f268c3ec78920971f7a4354b02f18176d3536aab1d54fe6",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 9,
+      "user_intent": "Execute node diag_review_synthesis: Synthèse et challenge croisé de la vision Symap/AgentsHub basée sur les preuves du code",
+      "actions_taken": "Work item in state 'pending'. Assigned expert: executor. Scope: Résultats des explorations Symap et AgentsHub.",
+      "outcome": "State: pending",
+      "node_ref": "diag_review_synthesis",
+      "created_at": 1789376844249
+    },
+    {
+      "id": "41e83f53b29912b702aaa10ccdedaad8f3e9f1b15af77633c9095bd8c4e67c1e",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 3,
+      "user_intent": "Execute graph node diag_explore_agentshub: Exploration approfondie du code AgentsHub pour auditer le statut réel et extraire des preuves",
+      "actions_taken": "Graph node reached state 'ready'. Scope: Dépôt d'AgentsHub.",
+      "outcome": "State: ready",
+      "node_ref": "diag_explore_agentshub",
+      "created_at": 1789376844266
+    },
+    {
+      "id": "f5d1abc569792d798e046b05784ec46b77756cd1a92b215772d5f56ba3e61272",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 4,
+      "user_intent": "Execute graph node diag_explore_symap: Exploration approfondie du code Symap pour auditer le statut réel et extraire des preuves",
+      "actions_taken": "Graph node reached state 'ready'. Scope: Dépôt de Symap.",
+      "outcome": "State: ready",
+      "node_ref": "diag_explore_symap",
+      "created_at": 1789376844272
+    },
+    {
+      "id": "1318dc22d7dad298be72f69d0e191a8460d5e4c120a962edc949cf394c569df6",
+      "session_id": "80a00780-0e20-47b7-9ca1-b48792811e46",
+      "round_number": 5,
+      "user_intent": "Execute graph node diag_review_synthesis: Synthèse et challenge croisé de la vision Symap/AgentsHub basée sur les preuves du code",
+      "actions_taken": "Graph node reached state 'blocked'. Scope: Résultats des explorations Symap et AgentsHub.",
+      "outcome": "State: blocked",
+      "node_ref": "diag_review_synthesis",
+      "created_at": 1789376844275
+    }
+  ]
+}
