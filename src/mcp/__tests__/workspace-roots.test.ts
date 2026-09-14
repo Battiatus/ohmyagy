@@ -9,6 +9,8 @@ import { test } from "bun:test";
 import { openDatabase } from "../../brain/sqlite-adapter.js";
 import { appendStagedRecord } from "../../brain/agy-capture.js";
 import { bindConversation, readRegisteredWorkspaces } from "../../brain/workspace-registry.js";
+import { BrainStore } from "../../brain/brain-store.js";
+import { drainStagedCapture } from "../../brain/staging-drain.js";
 
 /**
  * The invariant this file exists to protect: **a session's project identity comes
@@ -328,24 +330,56 @@ test("the capture journal is folded into the project automatically once roots bi
   }
 });
 
-test("two projects each get their own brain and never share a session", { timeout: 240_000 }, async () => {
-  const editorInstall = makeEditorInstall();
+test("two projects each get their own brain and never share a session", { timeout: 120_000 }, async () => {
+  // Isolation is proved against the real drain and the real BrainStore, in-process, so the
+  // assertion does not depend on the broker's fire-and-forget timing. The automatic trigger
+  // has its own test above; mixing the two made this one flaky under a full suite.
   const home = mkdtempSync(join(tmpdir(), "oma-home-"));
   const projectA = makeProject();
   const projectB = makeProject();
   stageBoundConversation(home, projectA, "conv-project-a");
   stageBoundConversation(home, projectB, "conv-project-b");
 
-  const brokerA = startBroker(editorInstall, [projectA], { home, env: NO_MODEL });
-  const brokerB = startBroker(editorInstall, [projectB], { home, env: NO_MODEL });
-  const brainA = join(projectA, ".oma", "brain.sqlite");
-  const brainB = join(projectB, ".oma", "brain.sqlite");
-  try {
-    await brokerA.request(1, "initialize", initializeParams());
-    await brokerB.request(1, "initialize", initializeParams());
+  const reformulate = async (text: string) => ({
+    context: text.slice(0, 40),
+    actions: "captured",
+  });
 
-    const summaryA = await waitForSessions(brainA, 1, brokerA.stderr);
-    const summaryB = await waitForSessions(brainB, 1, brokerB.stderr);
+  try {
+    const brainA = new BrainStore(join(projectA, ".oma", "brain.sqlite"));
+    try {
+      const drainedA = await drainStagedCapture({
+        brain: brainA,
+        workspaceRoot: projectA,
+        homeDirectory: home,
+        reformulate,
+      });
+      assert.equal(drainedA.captured, 1, "project A captures its own conversation");
+      assert.equal(
+        drainedA.skippedOtherProject,
+        1,
+        "and never captures the conversation bound to project B",
+      );
+    } finally {
+      brainA.close();
+    }
+
+    const brainB = new BrainStore(join(projectB, ".oma", "brain.sqlite"));
+    try {
+      const drainedB = await drainStagedCapture({
+        brain: brainB,
+        workspaceRoot: projectB,
+        homeDirectory: home,
+        reformulate,
+      });
+      assert.equal(drainedB.captured, 1, "project B captures its own conversation");
+      assert.equal(drainedB.skippedOtherProject, 1);
+    } finally {
+      brainB.close();
+    }
+
+    const summaryA = readBrain(join(projectA, ".oma", "brain.sqlite"));
+    const summaryB = readBrain(join(projectB, ".oma", "brain.sqlite"));
 
     // Each project owns exactly one project row, pointing at its own root.
     assert.equal(summaryA.projects, 1);
@@ -357,17 +391,40 @@ test("two projects each get their own brain and never share a session", { timeou
     assert.equal(summaryA.sessionIds.length, 1);
     assert.equal(summaryB.sessionIds.length, 1);
     assert.notEqual(summaryA.sessionIds[0], summaryB.sessionIds[0]);
-    assert.equal(existsSync(brainA), true);
-    assert.equal(existsSync(brainB), true);
+    assert.equal(existsSync(join(projectA, ".oma", "brain.sqlite")), true);
+    assert.equal(existsSync(join(projectB, ".oma", "brain.sqlite")), true);
+  } finally {
+    cleanup(projectA, projectB, home);
+  }
+});
 
-    // The registry knows both projects, so later attribution has a bounded set to
-    // decide against instead of "does this touch my root". Two brokers publish
-    // concurrently, which is why each root gets its own file.
-    const registry = readRegisteredWorkspaces(home);
+test("two brokers publish two distinct workspaces at the same time", { timeout: 180_000 }, async () => {
+  // The registry used to be one read-modify-written file, so two brokers starting together
+  // clobbered each other and one project vanished. Each root now has its own file.
+  const editorInstall = makeEditorInstall();
+  const home = mkdtempSync(join(tmpdir(), "oma-home-"));
+  const projectA = makeProject();
+  const projectB = makeProject();
+  const brokerA = startBroker(editorInstall, [projectA], { home, env: NO_MODEL });
+  const brokerB = startBroker(editorInstall, [projectB], { home, env: NO_MODEL });
+  try {
+    await brokerA.request(1, "initialize", initializeParams());
+    await brokerB.request(1, "initialize", initializeParams());
+
+    const deadline = Date.now() + 60_000;
+    let registry = readRegisteredWorkspaces(home);
+    while (registry.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      registry = readRegisteredWorkspaces(home);
+    }
     assert.equal(registry.length, 2, JSON.stringify(registry));
     assert.deepEqual(
       registry.map((entry) => entry.source),
       ["roots/list", "roots/list"],
+    );
+    assert.deepEqual(
+      registry.map((entry) => resolve(entry.root)).sort(),
+      [resolve(projectA), resolve(projectB)].sort(),
     );
   } finally {
     brokerA.close();

@@ -32,6 +32,11 @@ import {
 import { OmaDoctor, describeWorkspace, type WorkspaceReport } from "../runtime/doctor.js";
 import { registerWorkspace } from "../brain/workspace-registry.js";
 import { recordInterview } from "../mission/interview-gate.js";
+import {
+  DISPATCH_TOOL_DEFINITIONS,
+  DISPATCH_TOOL_NAMES,
+  executeDispatchNode,
+} from "./dispatch-tools.js";
 import { BrainStore } from "../brain/brain-store.js";
 import {
   BRAIN_SUCCESS_STATUSES,
@@ -317,6 +322,38 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
       return;
     }
 
+    // Dispatch is the one tool that runs a process, so it takes the asynchronous path
+    // instead of the synchronous `handleRequest` dispatch table.
+    if (message.method === "tools/call" && message.params?.name === "dispatch_node") {
+      try {
+        const dispatched = await executeDispatchNode({
+          workspaceRoot: config.workspaceRoot,
+          input: message.params?.arguments,
+        });
+        write({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(dispatched) }],
+            structuredContent: dispatched,
+            isError: dispatched.succeeded !== true,
+          },
+        });
+      } catch (error) {
+        const failure = { status: "rejected", reason: messageOf(error) };
+        write({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(failure) }],
+            structuredContent: failure,
+            isError: true,
+          },
+        });
+      }
+      return;
+    }
+
     write(handleRequest(config, journal, stagedRecords, message as JsonRpcRequest, getBrain));
   };
 
@@ -532,6 +569,7 @@ export function handleRequest(
           ...GRAPH_TOOL_DEFINITIONS,
           ...ROUTING_TOOL_DEFINITIONS,
           ...ORCHESTRATION_TOOL_DEFINITIONS,
+          ...DISPATCH_TOOL_DEFINITIONS,
         ],
       },
     };
