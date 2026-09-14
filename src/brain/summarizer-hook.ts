@@ -1,4 +1,5 @@
 import { appendStagedRecord, parseAgyHookPayload, toStagedRecord } from "./agy-capture.js";
+import { bindConversation } from "./workspace-registry.js";
 
 /**
  * OMA memory capture hook, wired to `PostToolUse`.
@@ -38,7 +39,24 @@ async function main(): Promise<void> {
     const payload = parseAgyHookPayload(await readStdin());
     if (payload) {
       const record = toStagedRecord(payload);
-      if (record) appendStagedRecord(record);
+      if (record) {
+        appendStagedRecord(record);
+        // When the host states a workspace, bind the conversation to it exactly. A
+        // stated workspace is evidence, not an inference, and it is the only project
+        // signal this hook can be given. A conflict is reported, never overwritten.
+        const declared = [...new Set(record.workspacePaths)];
+        if (declared.length === 1) {
+          try {
+            bindConversation({
+              conversationId: record.conversationId,
+              workspaceRoot: declared[0],
+              source: "host-workspacePaths",
+            });
+          } catch {
+            // An existing, different binding wins over a later statement.
+          }
+        }
+      }
     }
   } catch {
     // Fail open: capture is best effort, the session is sacred.

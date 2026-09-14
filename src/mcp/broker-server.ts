@@ -30,6 +30,7 @@ import {
   summarizeMission,
 } from "../mission/read-model.js";
 import { OmaDoctor, describeWorkspace, type WorkspaceReport } from "../runtime/doctor.js";
+import { registerWorkspace } from "../brain/workspace-registry.js";
 import { BrainStore } from "../brain/brain-store.js";
 import {
   BRAIN_SUCCESS_STATUSES,
@@ -178,6 +179,15 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
 
   const stagedRecords = new Map<string, StagedRecord>();
   const getBrain = createBrainAccessor(config);
+  // A broker given an explicit project publishes it immediately; a broker that only
+  // guessed its cwd has no project to publish. Registration is what capture
+  // attribution is decided against, so publishing a guess would defeat the point.
+  if (
+    config.workspaceRootIsExplicit &&
+    !describeWorkspace(config.workspaceRoot, config.workspaceRootSource).governsEditorInstall
+  ) {
+    registerWorkspace({ workspaceRoot: config.workspaceRoot, source: "OMA_WORKSPACE_ROOT" });
+  }
   const pendingReplies = new Map<string | number, (message: JsonRpcMessage) => void>();
   let rootsRequestSeq = 0;
   let workspaceBinding: Promise<void> | undefined;
@@ -238,6 +248,10 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
     }
     config.workspaceRoot = usable[0];
     config.workspaceRootSource = "roots/list";
+    // Publish the resolved project. Capture attribution is decided against the set of
+    // workspaces that really did bind, which is what stops one project's records from
+    // being poured into another.
+    registerWorkspace({ workspaceRoot: usable[0], source: "roots/list" });
   };
 
   const clientDeclaresRoots = (request: JsonRpcRequest): boolean => {

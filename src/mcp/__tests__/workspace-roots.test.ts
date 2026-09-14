@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
@@ -46,10 +46,20 @@ function makeProject(): string {
 }
 
 /** Spawn the broker as the editor would, and answer the roots request as the host must. */
-function startBroker(cwd: string, roots: readonly string[]): InteractiveBroker {
+function startBroker(
+  cwd: string,
+  roots: readonly string[],
+  options: { home?: string } = {},
+): InteractiveBroker {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (key !== "OMA_WORKSPACE_ROOT" && value !== undefined) env[key] = value;
+  }
+  if (options.home !== undefined) {
+    // `os.homedir()` follows USERPROFILE on Windows and HOME elsewhere; the broker
+    // publishes its project into the registry under there.
+    env.USERPROFILE = options.home;
+    env.HOME = options.home;
   }
   const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [brokerSource], {
     cwd,
@@ -121,7 +131,8 @@ function cleanup(...dirs: readonly string[]): void {
 test("the host's roots decide the project, not the directory the editor used as cwd", { timeout: 120_000 }, async () => {
   const editorInstall = makeEditorInstall();
   const project = makeProject();
-  const broker = startBroker(editorInstall, [project]);
+  const home = mkdtempSync(join(tmpdir(), "oma-home-"));
+  const broker = startBroker(editorInstall, [project], { home });
   try {
     await broker.request(1, "initialize", initializeParams());
     // Sent immediately after initialize on purpose: the transport must not let a
@@ -137,15 +148,25 @@ test("the host's roots decide the project, not the directory the editor used as 
     );
     assert.equal(existsSync(join(project, ".oma", "graph", "execution-graph.json")), true);
     assert.equal(existsSync(join(editorInstall, ".oma")), false);
+
+    // The resolved project must be published: capture attribution is decided against
+    // the workspaces that really bound, so a silent bind would leave memory stuck.
+    const registry = JSON.parse(
+      readFileSync(join(home, ".oma", "workspaces.json"), "utf8"),
+    ) as Array<{ root: string; source: string }>;
+    assert.equal(registry.length, 1, `registry: ${JSON.stringify(registry)}`);
+    assert.equal(registry[0].root, project);
+    assert.equal(registry[0].source, "roots/list");
   } finally {
     broker.close();
-    cleanup(project, editorInstall);
+    cleanup(project, editorInstall, home);
   }
 });
 
 test("an editor-install workspace with no host roots is refused, not silently used", { timeout: 120_000 }, async () => {
   const editorInstall = makeEditorInstall();
-  const broker = startBroker(editorInstall, []);
+  const home = mkdtempSync(join(tmpdir(), "oma-home-"));
+  const broker = startBroker(editorInstall, [], { home });
   try {
     await broker.request(1, "initialize", initializeParams());
     const refused = await broker.request(2, "tools/call", {
@@ -155,13 +176,16 @@ test("an editor-install workspace with no host roots is refused, not silently us
     assert.equal(refused.error?.code, -32002);
     assert.match(refused.error?.message ?? "", /editor installation directory/u);
     assert.equal(existsSync(join(editorInstall, ".oma")), false);
+    // A broker that only guessed its cwd has no project to publish. Registering the
+    // install tree would put it into the set attribution is decided against.
+    assert.equal(existsSync(join(home, ".oma", "workspaces.json")), false);
 
     // The escape hatch stays open: the cause must stay diagnosable.
     const doctor = await broker.request(3, "tools/call", { name: "doctor", arguments: {} });
     assert.equal(doctor.error, undefined, doctor.error?.message ?? "");
   } finally {
     broker.close();
-    cleanup(editorInstall);
+    cleanup(editorInstall, home);
   }
 });
 

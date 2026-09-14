@@ -28,6 +28,10 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
  * Flash reformulation all happen later on the side that does know the workspace
  * (see `staging-drain.ts`).
  *
+ * When the host *does* state a workspace (`workspacePaths`), the hook records it
+ * verbatim and binds the conversation to it: a statement is not an inference, and it
+ * is the only project signal the hook can be handed.
+ *
  * Everything here is fail-open and side-effect-light: the hook must never be
  * able to damage the session it observes.
  */
@@ -57,6 +61,12 @@ export interface StagedCaptureRecord {
   failed: boolean;
   /** Absolute paths mentioned by the tool call; used later for attribution. */
   paths: string[];
+  /**
+   * The host's own `workspacePaths` for this step, when it sends any. Empty on the
+   * hosts measured so far, but when present this is a statement rather than an
+   * inference and it binds the conversation exactly.
+   */
+  workspacePaths: string[];
   transcriptPath?: string;
 }
 
@@ -138,7 +148,7 @@ export function resolveConversationId(payload: AgyHookPayload): string | undefin
   return undefined;
 }
 
-function safeSegment(value: string): string {
+export function safeSegment(value: string): string {
   const cleaned = value.replace(/[^a-zA-Z0-9._-]/gu, "_");
   return cleaned.length > 0 ? cleaned : "unknown";
 }
@@ -204,6 +214,7 @@ export function toStagedRecord(
     tool: payload.toolCall?.name ?? null,
     failed: typeof payload.error === "string" && payload.error.length > 0,
     paths: collectAbsolutePaths(payload.toolCall?.args),
+    workspacePaths: (payload.workspacePaths ?? []).filter((entry) => isAbsolute(entry)),
   };
   if (payload.transcriptPath) record.transcriptPath = payload.transcriptPath;
   return record;
@@ -303,6 +314,9 @@ export function readStagedRecords(journalPath: string): StagedCaptureRecord[] {
         failed: parsed.failed === true,
         paths: Array.isArray(parsed.paths)
           ? parsed.paths.filter((entry): entry is string => typeof entry === "string")
+          : [],
+        workspacePaths: Array.isArray(parsed.workspacePaths)
+          ? parsed.workspacePaths.filter((entry): entry is string => typeof entry === "string")
           : [],
         transcriptPath:
           typeof parsed.transcriptPath === "string" ? parsed.transcriptPath : undefined,

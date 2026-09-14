@@ -4,6 +4,7 @@ import { OmaDoctor } from "../runtime/doctor.js";
 import { installWorkspacePlugin } from "../packaging/install.js";
 import { BrainStore } from "../brain/brain-store.js";
 import { drainStagedCapture } from "../brain/staging-drain.js";
+import { bindConversation } from "../brain/workspace-registry.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
 import { MissionProjectionEngine } from "../graph/mission-projections.js";
 import {
@@ -88,8 +89,33 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
 
     if (command === "memory") {
       const subcommand = args[1];
+      if (subcommand === "bind") {
+        // Explicit recovery for a conversation whose project cannot be decided from
+        // evidence — typically a journal captured before the host ever stated a
+        // workspace. An operator statement is allowed to bind; nothing else is.
+        const conversationId = args[2];
+        if (!conversationId) {
+          console.error("Usage: oma memory bind <conversationId> [--workspace <root>]");
+          return 1;
+        }
+        const workspaceFlagIdx = args.indexOf("--workspace");
+        const target =
+          workspaceFlagIdx !== -1 && args[workspaceFlagIdx + 1]
+            ? resolve(args[workspaceFlagIdx + 1])
+            : resolve(workspaceRoot);
+        const binding = bindConversation({
+          conversationId,
+          workspaceRoot: target,
+          source: "operator",
+          overwrite: args.includes("--force"),
+        });
+        console.log(
+          `[OMA] Conversation ${binding.conversationId} bound to ${binding.workspaceRoot} (${binding.source}).`,
+        );
+        return 0;
+      }
       if (subcommand !== "drain") {
-        console.error("Usage: oma memory drain [--json]");
+        console.error("Usage: oma memory drain [--json] | oma memory bind <conversationId> [--workspace <root>]");
         return 1;
       }
       // Folds the project-agnostic hook capture into this project's Brain. The
@@ -105,7 +131,9 @@ export async function runOmaCli(args: string[], workspaceRoot = process.cwd()): 
         } else {
           console.log(
             `[OMA] Memory drain: ${result.captured} conversation(s) captured, ` +
-              `${result.skippedUnattributed} unattributed (left in journal), ` +
+              `${result.skippedOtherProject} bound elsewhere, ` +
+              `${result.skippedAmbiguous} ambiguous, ` +
+              `${result.skippedUnattributed} with no evidence, ` +
               `${result.conversationsInspected} inspected.`,
           );
           for (const failure of result.errors) console.error(`  ! ${failure}`);

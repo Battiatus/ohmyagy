@@ -18,6 +18,7 @@ import {
 } from "../agy-capture.js";
 import { drainStagedCapture } from "../staging-drain.js";
 import { BrainStore } from "../brain-store.js";
+import { bindConversation, registerWorkspace } from "../workspace-registry.js";
 
 /**
  * Regression guard for the capture refonte. The previous implementation read a
@@ -187,13 +188,32 @@ describe("drain: attribution, condensation and idempotence", () => {
         "utf8",
       );
 
-      // One attributed conversation and one that must stay in the journal.
+      // One conversation this project owns, one that belongs elsewhere and one with
+      // no evidence at all. Only the first may be poured; the other two stay.
+      registerWorkspace({ workspaceRoot: workspace, source: "test", homeDirectory: home });
       appendStagedRecord(
-        { at: new Date().toISOString(), conversationId: "conv-symap", stepIdx: 2, tool: "view_file", failed: false, paths: [projectFile], transcriptPath },
+        { at: new Date().toISOString(), conversationId: "conv-symap", stepIdx: 2, tool: "view_file", failed: false, paths: [projectFile], workspacePaths: [], transcriptPath },
+        home,
+      );
+      const otherProject = makeTempRoot();
+      try {
+        bindConversation({
+          conversationId: "conv-elsewhere",
+          workspaceRoot: otherProject,
+          source: "test",
+          homeDirectory: home,
+        });
+      } catch {
+        // Binding an unbound conversation cannot fail.
+      } finally {
+        safeRemove(otherProject);
+      }
+      appendStagedRecord(
+        { at: new Date().toISOString(), conversationId: "conv-elsewhere", stepIdx: 2, tool: "view_file", failed: false, paths: [projectFile], workspacePaths: [], transcriptPath },
         home,
       );
       appendStagedRecord(
-        { at: new Date().toISOString(), conversationId: "conv-elsewhere", stepIdx: 2, tool: "view_file", failed: false, paths: [join(tmpdir(), "other", "z.ts")], transcriptPath },
+        { at: new Date().toISOString(), conversationId: "conv-no-evidence", stepIdx: 2, tool: "view_file", failed: false, paths: [join(tmpdir(), "other", "z.ts")], workspacePaths: [], transcriptPath },
         home,
       );
 
@@ -202,8 +222,13 @@ describe("drain: attribution, condensation and idempotence", () => {
 
       const first = await drainStagedCapture({ brain, workspaceRoot: workspace, homeDirectory: home, reformulate });
       assert.equal(first.captured, 1);
-      assert.equal(first.skippedUnattributed, 1, "an unattributable conversation must not be poured into the project");
-      assert.equal(first.conversationsInspected, 2);
+      assert.equal(
+        first.skippedOtherProject,
+        1,
+        "a conversation bound to another project must never be poured into this one, even when its paths point here",
+      );
+      assert.equal(first.skippedUnattributed, 1, "a conversation with no evidence must stay in the journal");
+      assert.equal(first.conversationsInspected, 3);
       assert.deepEqual(first.errors, []);
 
       const second = await drainStagedCapture({ brain, workspaceRoot: workspace, homeDirectory: home, reformulate });
@@ -229,6 +254,8 @@ describe("drain: attribution, condensation and idempotence", () => {
         conversationsInspected: 0,
         conversationsAttributed: 0,
         captured: 0,
+        skippedOtherProject: 0,
+        skippedAmbiguous: 0,
         skippedUnattributed: 0,
         errors: [],
       });
@@ -236,6 +263,88 @@ describe("drain: attribution, condensation and idempotence", () => {
       brain?.close();
       safeRemove(home);
       safeRemove(workspace);
+    }
+  });
+
+  test("the host's stated workspace outranks the paths the conversation touched", async () => {
+    const home = makeTempRoot();
+    const workspaceA = makeTempRoot();
+    const workspaceB = makeTempRoot();
+    let brain: BrainStore | undefined;
+    try {
+      const fileA = join(workspaceA, "a.ts");
+      const fileB = join(workspaceB, "b.ts");
+      writeFileSync(fileA, "a\n", "utf8");
+      writeFileSync(fileB, "b\n", "utf8");
+      const transcriptPath = join(workspaceB, "transcript_full.jsonl");
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: "USER_INPUT", step_index: 1, content: "statut ?" })}\n`,
+        "utf8",
+      );
+
+      // The session reads a file that lives in A while the host says it governs B.
+      // Path evidence alone would pour this into A; the host's statement must win.
+      appendStagedRecord(
+        { at: new Date().toISOString(), conversationId: "conv-host", stepIdx: 1, tool: "view_file", failed: false, paths: [fileA, fileB], workspacePaths: [workspaceB], transcriptPath },
+        home,
+      );
+
+      brain = new BrainStore(join(home, "brain.sqlite"));
+      const reformulate = async () => ({ context: "c", actions: "a" });
+
+      const inB = await drainStagedCapture({ brain, workspaceRoot: workspaceB, homeDirectory: home, reformulate });
+      assert.equal(inB.captured, 1, "the host's workspace is the project");
+
+      const inA = await drainStagedCapture({ brain, workspaceRoot: workspaceA, homeDirectory: home, reformulate });
+      assert.equal(inA.captured, 0, "the conversation is bound to B and must not be captured by A");
+      assert.equal(inA.skippedOtherProject, 1);
+    } finally {
+      brain?.close();
+      safeRemove(home);
+      safeRemove(workspaceA);
+      safeRemove(workspaceB);
+    }
+  });
+
+  test("evidence naming several projects is refused instead of guessed", async () => {
+    const home = makeTempRoot();
+    const workspaceA = makeTempRoot();
+    const workspaceB = makeTempRoot();
+    let brain: BrainStore | undefined;
+    try {
+      const fileA = join(workspaceA, "a.ts");
+      const fileB = join(workspaceB, "b.ts");
+      writeFileSync(fileA, "a\n", "utf8");
+      writeFileSync(fileB, "b\n", "utf8");
+      registerWorkspace({ workspaceRoot: workspaceA, source: "test", homeDirectory: home });
+      registerWorkspace({ workspaceRoot: workspaceB, source: "test", homeDirectory: home });
+      const transcriptPath = join(workspaceA, "transcript_full.jsonl");
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: "USER_INPUT", step_index: 1, content: "ambigu" })}\n`,
+        "utf8",
+      );
+      appendStagedRecord(
+        { at: new Date().toISOString(), conversationId: "conv-ambiguous", stepIdx: 1, tool: "view_file", failed: false, paths: [fileA, fileB], workspacePaths: [], transcriptPath },
+        home,
+      );
+
+      brain = new BrainStore(join(home, "brain.sqlite"));
+      const result = await drainStagedCapture({
+        brain,
+        workspaceRoot: workspaceA,
+        homeDirectory: home,
+        reformulate: async () => ({ context: "c", actions: "a" }),
+      });
+      assert.equal(result.captured, 0);
+      assert.equal(result.skippedAmbiguous, 1);
+      assert.match(result.errors.join("\n"), /several projects/u);
+    } finally {
+      brain?.close();
+      safeRemove(home);
+      safeRemove(workspaceA);
+      safeRemove(workspaceB);
     }
   });
 
