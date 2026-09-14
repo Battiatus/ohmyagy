@@ -19,14 +19,47 @@ import { workspaceStateFromContents, type WorkspaceState } from "./transaction.j
  * module replaces the first half.
  */
 
-/** Paths that are OMA's own state or are never part of a change proposal. */
+/**
+ * Paths that are OMA's own state, or are never part of a change proposal or the project's shape.
+ *
+ * Measured 2026-09-14 on Symap: with only `node_modules` and the OMA directories excluded, the
+ * survey's model was dominated by `genai-image/venv/Lib/site-packages/anthropic/...` — 794
+ * unresolved-specifier problems, all from a virtualenv, and a content version that hashed
+ * thousands of third-party files. Dependency trees, caches and build outputs are derived, not
+ * project, and the same list governs the snapshot, so leaving them in also made every
+ * proposal's compare-and-swap cover files nobody edits deliberately.
+ *
+ * A rule containing a slash matches from the root; a bare name matches any path segment.
+ */
 export const DEFAULT_SNAPSHOT_EXCLUDES: readonly string[] = [
+  ".agents/plugins/oma",
+  // OMA's own state.
   ".git",
   ".oma",
   ".omc",
   ".omo",
-  ".agents/plugins/oma",
+  // Installed dependencies.
   "node_modules",
+  "venv",
+  ".venv",
+  "site-packages",
+  "vendor",
+  // Caches.
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".cache",
+  ".turbo",
+  "coverage",
+  // Build outputs.
+  "dist",
+  "build",
+  "out",
+  "target",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
 ];
 
 export interface SnapshotOptions {
@@ -128,6 +161,51 @@ export function snapshotWorkspace(root: string, options: SnapshotOptions = {}): 
 /** Content-addressed state of a workspace, ignoring paths that are not part of a change. */
 export function snapshotWorkspaceState(root: string, options?: SnapshotOptions): WorkspaceState {
   return snapshotWorkspace(root, options).state;
+}
+
+/**
+ * Workspace-relative POSIX paths of every regular file, with the same exclusions the snapshot
+ * uses. The survey needs the file list without hashing or reading anything.
+ */
+export function listWorkspaceFiles(
+  root: string,
+  options: SnapshotOptions & { maxFiles?: number } = {},
+): string[] {
+  const resolvedRoot = resolve(root);
+  const excludes = options.excludes ?? DEFAULT_SNAPSHOT_EXCLUDES;
+  const maxFiles = options.maxFiles ?? 5_000;
+  const found: string[] = [];
+
+  const walk = (directory: string): void => {
+    if (found.length >= maxFiles) return;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (found.length >= maxFiles) return;
+      const absolute = join(directory, entry.name);
+      const relativePath = toPosix(relative(resolvedRoot, absolute));
+      if (isExcluded(relativePath, excludes)) continue;
+      let stats: ReturnType<typeof lstatSync>;
+      try {
+        stats = lstatSync(absolute);
+      } catch {
+        continue;
+      }
+      if (stats.isSymbolicLink()) continue;
+      if (stats.isDirectory()) {
+        walk(absolute);
+        continue;
+      }
+      if (stats.isFile()) found.push(relativePath);
+    }
+  };
+
+  walk(resolvedRoot);
+  return found;
 }
 
 /** True when `root` is the top level of a Git repository. */

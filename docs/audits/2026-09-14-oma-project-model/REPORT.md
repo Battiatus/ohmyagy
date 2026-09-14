@@ -45,11 +45,58 @@ another project's components.
 
 `npm test`: **439 pass, 3 skip, 0 fail**, exit 0.
 
-## What "complete" still needs
+## Relations
 
-- **Relations.** The model holds areas, not the links between them. Imports, ownership and
-  dependency edges between components are not represented, so "what depends on this?" cannot be
-  answered from the model.
-- **A survey, not only a by-product.** Components are learned from dispatch evidence. A project
-  nobody has dispatched into has an empty model; building the initial model from a
-  workspace-wide pass is a separate feeder.
+`project_component_relations` holds `(project_id, from_path, to_path, kind, source, mentions)`,
+upserted on `(from, to, kind)` like components are upserted on path. A list of areas answers "what
+is in this project"; it cannot answer "what depends on this", and that is what a structural change
+has to be checked against. `project_model` returns the links alongside the areas.
+
+## The survey: a model before anyone has explored
+
+Components learned from dispatch evidence only exist for a project somebody has already explored,
+which is backwards. `project_survey` (27 tools now) walks the tree once, records every **source**
+file as an area, and derives `imports` relations from the import statements it actually finds.
+
+Deliberately conservative: only specifiers that **resolve to another file in the workspace**
+become links. A bare package name is a dependency of the project, not a link between two of its
+areas, and mapping `"lodash"` to a path would be inventing structure. A relative specifier that
+does not resolve is reported rather than linked.
+
+## Measured on real projects
+
+`.oma/verify-project-model.mjs` surveys the OMA checkout and **Symap** — an aggregate of two
+repositories with no `.git` at its root. Read-only: the model goes to a throwaway Brain.
+
+```
+=== OMA checkout ===
+filesInspected: 774   components: 223   relations: 831   problems: 10
+most depended-upon: src/ledger/canonical.ts (46), src/graph/model.ts (28),
+                    src/ledger/mission-events.ts (24), src/graph/store.ts (24)
+
+=== Symap (aggregate, no .git) ===
+filesInspected: 1068  components: 446   relations: 59    problems: 0
+most depended-upon: genai-image/frontend/src/contexts/AuthContext.js (13),
+                    genai-image/frontend/src/services/secureTokenStorage.js (7),
+                    genai-image/frontend/src/services/api.js (7)
+```
+
+## Defect the measurement found
+
+The first run against Symap produced a model **dominated by
+`genai-image/venv/Lib/site-packages/anthropic/…`** — 794 unresolved-specifier problems, all from a
+virtualenv. Only `node_modules` and OMA's own directories were excluded, so a dependency tree, its
+caches and its build outputs were treated as project. The same list governs the snapshot, so this
+also meant every Git-free proposal's compare-and-swap hashed thousands of third-party files.
+
+`DEFAULT_SNAPSHOT_EXCLUDES` now covers installed dependencies (`venv`, `.venv`, `site-packages`,
+`vendor`), caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `coverage`, …) and
+build outputs (`dist`, `build`, `out`, `target`, `.next`, …). After the fix Symap's model is 446
+areas and 59 real links with **zero** problems, built in under 4 seconds.
+
+## Still open
+
+- **Ownership and cross-area links.** The survey derives `imports`. Nothing derives which area owns
+  which, or links that are not imports, so `kind` is exercised by one value only.
+- **Coverage of other languages.** Import extraction covers JavaScript/TypeScript and Python
+  module paths. Go, Rust, Ruby, Java, C# and the rest are recorded as areas but produce no links.

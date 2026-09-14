@@ -11,8 +11,10 @@ import {
   type MemoryEntry,
   type ProjectComponentRecord,
   type ProjectRecord,
+  type ProjectRelationRecord,
   type QueryMemoryInput,
   type RecordComponentInput,
+  type RecordRelationInput,
   type RecordInteractionInput,
   type SessionRecord,
   type StartSessionInput,
@@ -118,6 +120,26 @@ CREATE TABLE IF NOT EXISTS project_components (
 );
 
 CREATE INDEX IF NOT EXISTS idx_components_project ON project_components(project_id, last_seen_at);
+
+-- How the project's areas relate to each other.
+--
+-- A list of areas answers "what is in this project"; it cannot answer "what depends on this".
+-- Relations are what make the model navigable instead of a flat inventory, and they are what a
+-- structural change has to be checked against.
+CREATE TABLE IF NOT EXISTS project_component_relations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    from_path TEXT NOT NULL,
+    to_path TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    mentions INTEGER NOT NULL DEFAULT 1,
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    UNIQUE(project_id, from_path, to_path, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_relations_project ON project_component_relations(project_id, from_path);
 `;
 
 interface ProjectRow {
@@ -172,6 +194,32 @@ interface ProjectComponentRow {
   mentions: number;
   first_seen_at: number;
   last_seen_at: number;
+}
+
+interface ProjectRelationRow {
+  id: string;
+  project_id: string;
+  from_path: string;
+  to_path: string;
+  kind: string;
+  source: string;
+  mentions: number;
+  first_seen_at: number;
+  last_seen_at: number;
+}
+
+function mapRelationRow(row: ProjectRelationRow): ProjectRelationRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    fromPath: row.from_path,
+    toPath: row.to_path,
+    kind: row.kind,
+    source: row.source,
+    mentions: row.mentions,
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+  };
 }
 
 function mapComponentRow(row: ProjectComponentRow): ProjectComponentRecord {
@@ -512,6 +560,93 @@ export class BrainStore {
       )
       .all<ProjectComponentRow>(projectId, limit)
       .map(mapComponentRow);
+  }
+
+  /**
+   * Record a relation between two areas, upserting on (from, to, kind).
+   *
+   * Like components, a relation seen twice is the same relation seen twice — `mentions` counts
+   * the sightings rather than producing duplicate edges.
+   */
+  recordRelation(input: RecordRelationInput): ProjectRelationRecord {
+    const projectId = requireNonEmpty(input.projectId, "projectId");
+    if (!this.getProject(projectId)) {
+      throw new BrainStoreError("NOT_FOUND", `Unknown project '${projectId}'`);
+    }
+    const fromPath = requireNonEmpty(input.fromPath, "fromPath").replace(/\\/gu, "/");
+    const toPath = requireNonEmpty(input.toPath, "toPath").replace(/\\/gu, "/");
+    const kind = requireNonEmpty(input.kind, "kind");
+    const source = requireNonEmpty(input.source, "source");
+    const now = Date.now();
+
+    const existing =
+      this.db
+        .prepare(
+          "SELECT * FROM project_component_relations WHERE project_id = ? AND from_path = ? AND to_path = ? AND kind = ?",
+        )
+        .get<ProjectRelationRow>(projectId, fromPath, toPath, kind) ?? undefined;
+
+    if (existing === undefined) {
+      this.db
+        .prepare(
+          `INSERT INTO project_component_relations
+             (id, project_id, from_path, to_path, kind, source, mentions, first_seen_at, last_seen_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(randomUUID(), projectId, fromPath, toPath, kind, source, now, now);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE project_component_relations
+              SET source = ?, mentions = mentions + 1, last_seen_at = ?
+            WHERE id = ?`,
+        )
+        .run(source, now, existing.id);
+    }
+
+    const row =
+      this.db
+        .prepare(
+          "SELECT * FROM project_component_relations WHERE project_id = ? AND from_path = ? AND to_path = ? AND kind = ?",
+        )
+        .get<ProjectRelationRow>(projectId, fromPath, toPath, kind) ?? undefined;
+    if (row === undefined) {
+      throw new BrainStoreError(
+        "CONSTRAINT_ERROR",
+        `Relation ${fromPath} -> ${toPath} could not be read back`,
+      );
+    }
+    return mapRelationRow(row);
+  }
+
+  /** Relations of a project, optionally those leaving one area. Strictly project-scoped. */
+  listRelations(input: {
+    projectId: string;
+    fromPath?: string;
+    limit?: number;
+  }): ProjectRelationRecord[] {
+    const projectId = requireNonEmpty(input.projectId, "projectId");
+    const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_QUERY_LIMIT), MAX_QUERY_LIMIT);
+    if (input.fromPath !== undefined) {
+      return this.db
+        .prepare(
+          `SELECT * FROM project_component_relations
+            WHERE project_id = ? AND from_path = ?
+            ORDER BY to_path ASC
+            LIMIT ?`,
+        )
+        .all<ProjectRelationRow>(projectId, input.fromPath.replace(/\\/gu, "/"), limit)
+        .map(mapRelationRow);
+    }
+    return this.db
+      .prepare(
+        `SELECT * FROM project_component_relations
+          WHERE project_id = ?
+          ORDER BY last_seen_at DESC, from_path ASC, to_path ASC
+          LIMIT ?`,
+      )
+      .all<ProjectRelationRow>(projectId, limit)
+      .map(mapRelationRow);
   }
 
   /**

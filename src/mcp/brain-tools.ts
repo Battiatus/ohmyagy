@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { BrainStore, BrainStoreError } from "../brain/brain-store.js";
+import { surveyWorkspace } from "../brain/project-survey.js";
 import {
   MEMORY_DIMENSIONS,
   type MemoryDimension,
@@ -23,6 +24,7 @@ export const BRAIN_TOOL_NAMES = new Set([
   "brain_summarize",
   "brain_compact",
   "project_model",
+  "project_survey",
 ]);
 
 /** Result statuses the broker must treat as success (not JSON-RPC errors). */
@@ -32,6 +34,7 @@ export const BRAIN_SUCCESS_STATUSES = new Set([
   "summarized",
   "compacted",
   "reported",
+  "surveyed",
 ]);
 
 
@@ -188,6 +191,25 @@ export const BRAIN_TOOL_DEFINITIONS = [
         limit: {
           type: "number",
           description: "Maximum components to return, most recently seen first. Default: 20.",
+          minimum: 1,
+        },
+      },
+    },
+  },
+  {
+    name: "project_survey",
+    description:
+      "Build the durable project model from the workspace itself: walk the tree, record every source file as an area of the project, and derive the imports that link them. This is what gives a project a model before anyone has explored it. Records components and relations only; changes nothing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          description: "Target project id. Defaults to the current workspace project.",
+        },
+        maxFiles: {
+          type: "number",
+          description: "Maximum files to inspect. Default: 2000.",
           minimum: 1,
         },
       },
@@ -476,9 +498,27 @@ export function executeBrainTool(
       return executeCompact(brain, workspaceRoot, args);
     case "project_model":
       return executeProjectModel(brain, workspaceRoot, args);
+    case "project_survey":
+      return executeProjectSurvey(brain, workspaceRoot, args);
     default:
       throw new Error(`Unknown brain tool: ${toolName}`);
   }
+}
+
+/** Build the project model from the workspace: areas from the file list, links from imports. */
+function executeProjectSurvey(
+  brain: BrainStore,
+  workspaceRoot: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const project = resolveProject(brain, workspaceRoot, args);
+  const result = surveyWorkspace({
+    workspaceRoot,
+    brain,
+    projectId: project.id,
+    ...(typeof args.maxFiles === "number" ? { maxFiles: args.maxFiles } : {}),
+  });
+  return { ...result };
 }
 
 /**
@@ -495,6 +535,7 @@ function executeProjectModel(
   const project = resolveProject(brain, workspaceRoot, args);
   const limit = typeof args.limit === "number" ? args.limit : undefined;
   const components = brain.listComponents({ projectId: project.id, ...(limit !== undefined ? { limit } : {}) });
+  const relations = brain.listRelations({ projectId: project.id, ...(limit !== undefined ? { limit } : {}) });
   return {
     status: "reported",
     projectId: project.id,
@@ -508,6 +549,16 @@ function executeProjectModel(
       lastSeenAt: component.lastSeenAt,
     })),
     count: components.length,
+    // A list of areas cannot answer "what depends on this"; the links are part of the model.
+    relations: relations.map((relation) => ({
+      from: relation.fromPath,
+      to: relation.toPath,
+      kind: relation.kind,
+      source: relation.source,
+      mentions: relation.mentions,
+      lastSeenAt: relation.lastSeenAt,
+    })),
+    relationCount: relations.length,
   };
 }
 

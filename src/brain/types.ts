@@ -71,6 +71,33 @@ export interface RecordComponentInput {
   summary?: string | null;
 }
 
+/**
+ * A link between two areas of the project.
+ *
+ * A list of areas answers "what is in this project"; it cannot answer "what depends on this".
+ * `kind` is deliberately open (`imports`, `owns`, …) because the survey and a dispatch may each
+ * learn a different sort of link, and neither should have to be modelled away.
+ */
+export interface ProjectRelationRecord {
+  id: string;
+  projectId: string;
+  fromPath: string;
+  toPath: string;
+  kind: string;
+  source: string;
+  mentions: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+}
+
+export interface RecordRelationInput {
+  projectId: string;
+  fromPath: string;
+  toPath: string;
+  kind: string;
+  source: string;
+}
+
 /** A single OMA working session scoped to one project. */
 export interface SessionRecord {
   id: string;
