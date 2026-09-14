@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "bun:test";
@@ -65,6 +65,38 @@ function fakeDriver(captured: CapturedInvocation[], status: "success" | "failed"
         },
         ...(status === "success" ? {} : { error: "invalid model selection" }),
       };
+    },
+  };
+}
+
+function successResult(
+  options: DriverInvocationOptions,
+  rawStdout: string,
+): DriverExecutionResult {
+  return {
+    exitCode: 0,
+    status: "success",
+    timedOut: false,
+    parsedOutput: JSON.parse(rawStdout),
+    rawStdout,
+    rawStderr: "",
+    scrubbedStdout: rawStdout,
+    scrubbedStderr: "",
+    stdoutHash: "a".repeat(64),
+    scrubbedStdoutHash: "a".repeat(64),
+    durationMs: 1234,
+    receipt: {
+      runId: options.runId ?? "run",
+      expertId: "unknown",
+      model: options.modelOverride ?? "agy-default",
+      effort: options.reasoningEffort ?? "agy-default",
+      sandbox: "workspace-write",
+      durationMs: 1234,
+      exitCode: 0,
+      status: "success",
+      stdoutHash: "a".repeat(64),
+      scrubbedStdoutHash: "a".repeat(64),
+      receiptHash: "b".repeat(64),
     },
   };
 }
@@ -185,18 +217,79 @@ describe("dispatch_node runs the expert the node is assigned to", () => {
     assert.equal(startedEvent.runId, finishedEvent.runId);
   });
 
-  it("refuses to dispatch a node assigned to an expert that may write", async () => {
+  it("dispatches a writer into an isolated copy and returns a changeSet, never touching the workspace", async () => {
+    const liveFile = join(root, "src", "db.ts");
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(liveFile, "export const mode = 'manual';\n", "utf8");
+
     executeGraphInit(root, { missionId: "m-writer", goal: "g", nodes: [executorNode()], edges: [] });
     authorise("m-writer");
 
-    await assert.rejects(
-      () =>
-        executeDispatchNode({
-          workspaceRoot: root,
-          input: { nodeId: "write-fix", missionId: "m-writer" },
-          driver: fakeDriver([]),
-        }),
-      /may write[\s\S]*propose_change/u,
+    // The fake writer edits the tree it was given, which must not be the live workspace.
+    const writingDriver: IAgyDriver = {
+      async invoke(options: DriverInvocationOptions): Promise<DriverExecutionResult> {
+        writeFileSync(join(options.worktreeDir, "src", "db.ts"), "export const mode = 'sync';\n", "utf8");
+        writeFileSync(join(options.worktreeDir, "src", "new-file.ts"), "export const added = true;\n", "utf8");
+        const rawStdout = '{"summary":"made the job automatic","evidence":["src/db.ts"],"confidence":"high"}';
+        return successResult(options, rawStdout);
+      },
+    };
+
+    const result = await executeDispatchNode({
+      workspaceRoot: root,
+      input: { nodeId: "write-fix", missionId: "m-writer" },
+      driver: writingDriver,
+    });
+
+    assert.equal(result.succeeded, true);
+    assert.equal((result.expert as Record<string, unknown>).sandbox, "workspace-write");
+
+    // The live workspace is untouched: the change exists only as a proposal-ready change set.
+    assert.equal(readFileSync(liveFile, "utf8"), "export const mode = 'manual';\n");
+    assert.equal(existsSync(join(root, "src", "new-file.ts")), false);
+
+    const changeSet = result.changeSet as { operations: Array<Record<string, unknown>>; changedPaths: string[] };
+    assert.deepEqual(changeSet.changedPaths.sort(), ["src/db.ts", "src/new-file.ts"]);
+    const modified = changeSet.operations.find((operation) => operation.path === "src/db.ts");
+    assert.equal(modified?.kind, "write");
+    assert.equal(modified?.content, "export const mode = 'sync';\n");
+    assert.match(String(modified?.baseHash), /^[a-f0-9]{64}$/u, "a modification carries the hash it replaces");
+    const created = changeSet.operations.find((operation) => operation.path === "src/new-file.ts");
+    assert.equal(created?.baseHash, null, "a creation carries no base hash");
+  });
+
+  it("reports a binary change instead of smuggling it into a text operation", async () => {
+    mkdirSync(join(root, "assets"), { recursive: true });
+    writeFileSync(join(root, "assets", "logo.bin"), Buffer.from([1, 2, 3]), "utf8");
+    executeGraphInit(root, { missionId: "m-binary", goal: "g", nodes: [executorNode()], edges: [] });
+    authorise("m-binary");
+
+    const binaryDriver: IAgyDriver = {
+      async invoke(options: DriverInvocationOptions): Promise<DriverExecutionResult> {
+        writeFileSync(join(options.worktreeDir, "assets", "logo.bin"), Buffer.from([1, 0, 2, 3]));
+        return successResult(options, '{"summary":"n/a","evidence":[],"confidence":"low"}');
+      },
+    };
+
+    const result = await executeDispatchNode({
+      workspaceRoot: root,
+      input: { nodeId: "write-fix", missionId: "m-binary" },
+      driver: binaryDriver,
+    });
+    const changeSet = result.changeSet as { operations: unknown[]; binaryPaths?: string[] };
+    assert.deepEqual(changeSet.binaryPaths, ["assets/logo.bin"]);
+    assert.equal(changeSet.operations.length, 0);
+  });
+
+  it("refuses a submission that no dispatched run backs", async () => {
+    executeGraphInit(root, { missionId: "m-unattributed", goal: "g", nodes: [explorerNode()], edges: [] });
+    authorise("m-unattributed");
+
+    // The old code wrote its own `run_finished` for this transition, attributed to whichever
+    // expert the caller named, so any node could be completed with nothing behind it.
+    assert.throws(
+      () => executeGraphMarkNode(root, { missionId: "m-unattributed", nodeId: "explore-db", state: "succeeded" }),
+      /no run was ever started for it[\s\S]*dispatch_node/u,
     );
   });
 

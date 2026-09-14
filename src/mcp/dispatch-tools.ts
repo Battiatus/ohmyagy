@@ -1,5 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { copyWorkspaceTree } from "../broker/nongit-staging.js";
+import { snapshotWorkspace } from "../broker/workspace-snapshot.js";
 import { loadGraphRuntime } from "../graph/store.js";
 import { projectGraph } from "../graph/kernel.js";
 import { MissionEventsStore } from "../ledger/mission-events.js";
@@ -42,7 +45,7 @@ export const DISPATCH_TOOL_DEFINITIONS = [
   {
     name: "dispatch_node",
     description:
-      "Dispatch a ready graph node to the expert it is assigned to, as a real AntiGravity run with that expert's model class, effort and sandbox. Read-only experts only; mutations go through propose_change. Records run_started/run_finished under the expert that actually ran.",
+      "Dispatch a ready graph node to the expert it is assigned to, as a real AntiGravity run with that expert's model class, effort and sandbox. A read-only expert runs in the workspace; a writer runs in an isolated copy and returns a changeSet of operations for propose_change, so dispatching never edits the live tree.",
     inputSchema: {
       type: "object",
       properties: {
@@ -181,16 +184,23 @@ export async function executeDispatchNode(
 
   const persona = node.executor?.persona ?? node.completionAuthority;
   const capability = CapabilityResolver.resolve(persona);
-  if (!capability.readOnly) {
-    throw new Error(
-      `Node '${nodeId}' is assigned to '${capability.expertId}', which may write. dispatch_node only runs read-only experts: a writer in the live tree would bypass the reviewed two-phase commit. Use propose_change for mutations.`,
-    );
-  }
 
   const missionId = resolveMissionId(options.workspaceRoot, input);
   // The interview gate applies to dispatch exactly as it does to converge_step: no expert
   // is woken before the user has answered and confirmed.
   assertInterviewAuthorisesExecution({ workspaceRoot: options.workspaceRoot, missionId });
+
+  // A writer works in an isolated copy, never in the live tree. Its output is a change set for
+  // the reviewed path (`propose_change` → review → gates → promote), so dispatching a writer
+  // cannot bypass the two-phase commit. It used to be refused outright because there was nowhere
+  // isolated for it to work; the staging container is that place.
+  const container = capability.readOnly
+    ? undefined
+    : mkdtempSync(join(tmpdir(), "oma-dispatch-writer-"));
+  const baseSnapshot = container === undefined ? undefined : snapshotWorkspace(options.workspaceRoot);
+  if (container !== undefined && baseSnapshot !== undefined) {
+    copyWorkspaceTree(options.workspaceRoot, container);
+  }
 
   const eventsPath = ensureMissionStarted(options.workspaceRoot, missionId);
   const dispatchId = `dispatch-${nodeId}-${Date.now()}`;
@@ -205,26 +215,32 @@ export async function executeDispatchNode(
 
   const driver = options.driver ?? new AgyDriver();
   const started = Date.now();
-  const result = await driver.invoke({
-    contractPrompt: buildInstruction(
-      node,
-      missionId,
-      capability.expertId,
-      typeof input.instruction === "string" ? input.instruction : undefined,
-    ),
-    persona: capability.expertId,
-    worktreeDir: options.workspaceRoot,
-    timeoutMs:
-      typeof input.timeoutMs === "number" && Number.isFinite(input.timeoutMs)
-        ? input.timeoutMs
-        : options.timeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS,
-    modelOverride: capability.modelSlug,
-    reasoningEffort: capability.effort,
-    sandboxMode: capability.sandbox,
-    useSandbox: false,
-    bare: true,
-    runId: dispatchId,
-  });
+  let result;
+  try {
+    result = await driver.invoke({
+      contractPrompt: buildInstruction(
+        node,
+        missionId,
+        capability.expertId,
+        typeof input.instruction === "string" ? input.instruction : undefined,
+      ),
+      persona: capability.expertId,
+      worktreeDir: container ?? options.workspaceRoot,
+      timeoutMs:
+        typeof input.timeoutMs === "number" && Number.isFinite(input.timeoutMs)
+          ? input.timeoutMs
+          : options.timeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS,
+      modelOverride: capability.modelSlug,
+      reasoningEffort: capability.effort,
+      sandboxMode: capability.sandbox,
+      useSandbox: false,
+      bare: true,
+      runId: dispatchId,
+    });
+  } catch (error) {
+    if (container !== undefined) safeRemove(container);
+    throw error;
+  }
   const durationMs = Date.now() - started;
 
   const succeeded = result.status === "success";
@@ -239,6 +255,18 @@ export async function executeDispatchNode(
   });
 
   const raw = typeof result.rawStdout === "string" ? result.rawStdout : "";
+
+  // A writer produced files in the container; turn them into the operations `propose_change`
+  // expects, then discard the container. The live workspace was never touched.
+  let changeSet: Record<string, unknown> | undefined;
+  if (container !== undefined && baseSnapshot !== undefined) {
+    try {
+      changeSet = collectChangeSet(baseSnapshot.state.files, container);
+    } finally {
+      safeRemove(container);
+    }
+  }
+
   return {
     status: "dispatched",
     nodeId,
@@ -257,5 +285,66 @@ export async function executeDispatchNode(
     ...(succeeded ? {} : { error: result.error ?? result.status }),
     output: resolveAnswer(result),
     receipt: result.receipt,
+    ...(changeSet !== undefined ? { changeSet } : {}),
   };
+}
+
+/**
+ * The difference between the pre-dispatch snapshot and what the expert wrote in the container.
+ *
+ * A binary change is reported rather than smuggled: the proposal schema carries file contents as
+ * text, so a binary edit could not be reviewed as text and must be handled deliberately.
+ */
+function collectChangeSet(
+  baseFiles: Readonly<Record<string, string>>,
+  containerPath: string,
+): Record<string, unknown> {
+  const after = snapshotWorkspace(containerPath);
+  const operations: Array<Record<string, unknown>> = [];
+  const binaryPaths: string[] = [];
+
+  for (const path of [...new Set([...Object.keys(baseFiles), ...Object.keys(after.state.files)])].sort()) {
+    const before = baseFiles[path];
+    const now = after.state.files[path];
+    if (before === now) continue;
+    if (now === undefined) {
+      operations.push({ kind: "delete", path, baseHash: before });
+      continue;
+    }
+    let buffer: Buffer;
+    try {
+      buffer = readFileSync(join(containerPath, ...path.split("/")));
+    } catch {
+      continue;
+    }
+    if (buffer.includes(0)) {
+      binaryPaths.push(path);
+      continue;
+    }
+    operations.push({
+      kind: "write",
+      path,
+      baseHash: before ?? null,
+      content: buffer.toString("utf8"),
+    });
+  }
+
+  return {
+    schemaVersion: 1,
+    // `parentVersion` is deliberately absent: `propose_change` accepts `"current"`, and the
+    // proposal must be validated against the workspace as it is when it is actually made.
+    operations,
+    changedPaths: operations.map((operation) => operation.path),
+    ...(binaryPaths.length > 0 ? { binaryPaths } : {}),
+    ...(after.problems.length > 0 ? { problems: after.problems } : {}),
+  };
+}
+
+/** Best-effort container removal; a lock must not fail an otherwise-successful dispatch. */
+function safeRemove(path: string): void {
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch {
+    // The OS reaps the temp directory.
+  }
 }

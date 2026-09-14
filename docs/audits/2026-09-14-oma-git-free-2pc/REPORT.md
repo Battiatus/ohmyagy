@@ -69,11 +69,27 @@ staying out of the snapshot. The symbolic-link test is skipped with a reason: Wi
 
 `npm test`: **434 pass, 3 skip, 0 fail**, exit 0.
 
+## Writer experts are dispatched into the container
+
+`dispatch_node` refused any expert that may write, because it ran in the live workspace and a
+writer there would bypass the reviewed path. The staging container is the missing place, so the
+refusal is gone:
+
+- a **read-only** expert still runs in the workspace, with a read-only sandbox;
+- a **writer** runs in an isolated copy of the workspace, and its result is a `changeSet` of
+  proposal-ready operations — `{kind, path, baseHash, content}` — plus `changedPaths`. The live
+  tree is never edited, the container is discarded, and the change still has to go through
+  `propose_change` → review → gates → promote.
+- A **binary** change is reported in `binaryPaths` rather than smuggled into a text operation:
+  the proposal schema carries contents as text, so a binary edit cannot be reviewed as text and
+  must be handled deliberately.
+
+Pinned by tests: the live workspace is byte-identical after a writer dispatch, a modification
+carries the hash it replaces, a creation carries `baseHash: null`, and a binary edit lands in
+`binaryPaths` with no operation.
+
 ## Still open for Layer 5
 
-- `dispatch_node` still refuses writer experts. It runs in the live workspace, so a writer would
-  bypass review — but the staging container now exists, which is where a writer belongs. Wiring
-  dispatch-into-a-container is the next step.
 - Changes **inside** a sub-repository are snapshotted as ordinary files: the aggregate is one
-  project to OMA today. Per-sub-repository identity (each with its own parent version) is not
-  modelled yet.
+  project to OMA today. Per-sub-repository identity — each with its own parent version — is not
+  modelled.

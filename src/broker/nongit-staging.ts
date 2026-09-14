@@ -47,7 +47,14 @@ export function usesGitFreeStaging(root: string): boolean {
   return !isGitTopLevel(root);
 }
 
-function copyWorkspace(source: string, destination: string): void {
+/**
+ * Copy a workspace into a container, applying the same exclusions the snapshot uses.
+ *
+ * Exported because a writer expert must be dispatched into an isolated copy rather than into the
+ * live tree: `dispatch_node` for a writer uses this to give the expert somewhere to work whose
+ * output is a change set for the reviewed path, not an edit to the project.
+ */
+export function copyWorkspaceTree(source: string, destination: string): void {
   mkdirSync(destination, { recursive: true });
   cpSync(source, destination, {
     recursive: true,
@@ -152,7 +159,7 @@ export function stageProposalWithoutGit(
   const worktreePath = join(containerPath, "worktree");
 
   try {
-    copyWorkspace(workspaceRoot, worktreePath);
+    copyWorkspaceTree(workspaceRoot, worktreePath);
 
     for (const operation of transaction.operations) {
       const target = resolveSafeTarget(worktreePath, operation.path);
