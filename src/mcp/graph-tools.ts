@@ -23,6 +23,7 @@ import { MissionEventsStore, type WorkItemDiscoveredPayload } from "../ledger/mi
 import { eventsPathFor, findActiveMissionId, ensureMissionStarted } from "../mission/read-model.js";
 import { assertInterviewAuthorisesExecution } from "../mission/interview-gate.js";
 import { assertNodeCompletionIsAttributed } from "../mission/run-attribution.js";
+import { BOOTSTRAP_NODE_ID, buildInitialExecutionGraph } from "../graph/bootstrap.js";
 
 /**
  * MCP tool surface for the Execution Graph.
@@ -295,40 +296,18 @@ export function executeGraphInit(
 
   let isCustomNodes = false;
   if (!existsSync(paths.definition)) {
-    let initialGraph: ExecutionGraph;
-    if (Array.isArray(input.nodes) && input.nodes.length > 0) {
-      isCustomNodes = true;
-      initialGraph = parseExecutionGraph({
-        schemaVersion: 2,
-        graphId,
-        revision: 1,
-        schedulerAuthorityId,
-        nodes: input.nodes,
-        edges: Array.isArray(input.edges) ? input.edges : [],
-      });
-    } else {
-      const rootNodeId = "bootstrap";
-      const rootNode: GraphNode = {
-        id: rootNodeId,
-        title: goal ?? "OMA bootstrap",
-        kind: "join",
-        activation: "all",
-        completionAuthority: "scheduler",
-        completionAuthorityId: schedulerAuthorityId,
-        // Engine-seeded, not requested work. It exists only so revision 1 has a
-        // parent for the first proposal. Marking it synthetic keeps a bare
-        // `graph_init` from reporting the mission as succeeded.
-        synthetic: true,
-      };
-      initialGraph = {
-        schemaVersion: 2,
-        graphId,
-        revision: 1,
-        schedulerAuthorityId,
-        nodes: [rootNode],
-        edges: [],
-      };
-    }
+    isCustomNodes = Array.isArray(input.nodes) && input.nodes.length > 0;
+    const initialGraph = buildInitialExecutionGraph({
+      graphId,
+      schedulerAuthorityId,
+      ...(goal !== undefined ? { title: goal } : {}),
+      ...(isCustomNodes
+        ? {
+            nodes: input.nodes as GraphNode[],
+            edges: Array.isArray(input.edges) ? (input.edges as GraphEdge[]) : [],
+          }
+        : {}),
+    });
     writeFileSync(paths.definition, `${JSON.stringify(initialGraph, null, 2)}\n`, "utf8");
   }
 

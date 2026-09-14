@@ -25,13 +25,27 @@ describe("Phase 4 — Dynamic Workflow, Convergence & Gate Observable", () => {
     pipeline: originalPipeline,
   };
 
-  // SUSPENDED: the detached engine's convergence relied on asserting
-  // `isIntegrated: true`, which the success contract now refuses to honour
-  // without delivered work. The engine also emits no graph edges, so a repaired
-  // wave-1 failure remains a failed sink and its graph can never reach
-  // `succeeded`. Gates 4.3 and 4.4 below still pass and still cover the
-  // no-progress and budget paths. Re-enable with the engine's graph alignment
-  // (finding C6) — not by relaxing the contract.
+  // SUSPENDED, with a measured reason rather than the speculative one this comment used to
+  // carry ("the engine emits no graph edges"). Un-suspending it produced a concrete answer,
+  // and diagnosing it found one defect that is now fixed and one that remains:
+  //
+  //   MEASURED 2026-09-14: the engine reaches green progress — 0 hidden/visible tests
+  //   failing, 0 gate failures, 1/1 work items accepted — and still reports
+  //   `budget_exhausted` after 3 waves.
+  //
+  //   FIXED: the engine hand-wrote its revision-1 graph as
+  //   `{schemaVersion, graphId, revision, nodes: [], edges: []}`. `parseExecutionGraph`
+  //   rejects that twice (no `schedulerAuthorityId`, and an empty `nodes` array), and a
+  //   `catch {}` swallowed the parse error, so the engine ran with an empty fallback graph.
+  //   Both orchestrators now build the graph through `src/graph/bootstrap.ts`, and the
+  //   engine throws instead of continuing without one.
+  //
+  //   REMAINING (this is what keeps the test suspended): the engine appends
+  //   `node_dispatched` for each work item inside `try {} catch {}`, but never adds those
+  //   work items to the graph — it only ever holds the synthetic seed. A graph with no
+  //   deliverable node cannot be `succeeded`, which is correct, so the mission exhausts its
+  //   budget. Re-enable once the engine materializes work items (and repair edges) as graph
+  //   nodes — not by relaxing the success contract.
   it.skip("Gate 4.1 & 4.2: Red gate in wave 1 triggers dynamic wave 2 which converges to green with new Runs & diagnostics", async () => {
     const testDir = join(process.cwd(), ".oma", "test-phase4-converge");
     rmSync(testDir, { recursive: true, force: true });

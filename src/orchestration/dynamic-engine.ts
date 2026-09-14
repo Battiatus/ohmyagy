@@ -35,6 +35,7 @@ import {
   type LoadedGraphRuntime,
 } from "../graph/store.js";
 import { projectGraph } from "../graph/kernel.js";
+import { buildInitialExecutionGraph } from "../graph/bootstrap.js";
 import type { GraphProposal } from "../graph/proposal.js";
 import * as originalMath from "../../test-fixtures/minimal-pipeline/src/math.js";
 import * as originalParser from "../../test-fixtures/minimal-pipeline/src/parser.js";
@@ -168,25 +169,38 @@ export class DynamicConvergenceEngine {
     let graphRuntime: LoadedGraphRuntime | undefined;
     if (!existsSync(gPaths.definition)) {
       mkdirSync(gPaths.graphDir, { recursive: true });
-      const initialGraph = {
-        schemaVersion: 1,
+      // The canonical builder, not a hand-written object: this used to omit
+      // `schedulerAuthorityId` and pass empty `nodes`, both of which
+      // `parseExecutionGraph` rejects, and the rejection was swallowed below — so the
+      // engine ran with an empty fallback graph and could never be declared successful.
+      const initialGraph = buildInitialExecutionGraph({
         graphId: `graph-${missionId}`,
-        revision: 1,
-        nodes: [],
-        edges: [],
-      };
-      writeFileSync(gPaths.definition, JSON.stringify(initialGraph, null, 2), "utf8");
+        schedulerAuthorityId: "oma-dynamic-engine",
+        title: `Detached engine seed for ${missionId}`,
+      });
+      writeFileSync(gPaths.definition, `${JSON.stringify(initialGraph, null, 2)}\n`, "utf8");
     }
+    let graphLoadError: string | undefined;
     try {
       if (!existsSync(gPaths.events) && !existsSync(gPaths.head)) {
         graphRuntime = initializeGraphStore(workspaceRoot);
       } else {
         graphRuntime = loadGraphRuntime(workspaceRoot);
       }
-    } catch {
+    } catch (error) {
       try {
         graphRuntime = loadGraphRuntime(workspaceRoot);
-      } catch {}
+      } catch (secondError) {
+        graphLoadError = secondError instanceof Error ? secondError.message : String(secondError);
+      }
+    }
+    if (graphRuntime === undefined) {
+      // Without a graph there is no deliverable node, so `evaluateConvergenceStep` can never
+      // reach `succeeded` and the mission would exhaust its budget while making real progress.
+      // Failing loudly is the only honest outcome.
+      throw new Error(
+        `Dynamic engine cannot run without an execution graph: ${graphLoadError ?? "unknown graph load failure"}`,
+      );
     }
 
     // 0. Start Mission & Journal Entry
