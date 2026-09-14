@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgyDriver } from "./agy-driver.js";
@@ -400,6 +400,15 @@ function samePath(left: string, right: string): boolean {
   return normalize(left) === normalize(right);
 }
 
+/** Best-effort removal; a locked temp directory must never fail a diagnosis. */
+function safeRemoveDirectory(path: string): void {
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch {
+    // The OS will reap it.
+  }
+}
+
 function isActualAgyExecutable(filePath: string): boolean {
   if (!filePath) return false;
   const name = basename(filePath).toLocaleLowerCase("en-US");
@@ -556,17 +565,23 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
 
   let stdout = "";
   let stderr = "";
+  // Probe under a throwaway OMA home inside the workspace's own ignored `.oma/`. The
+  // broker publishes the workspace it binds into the machine-wide registry, so an
+  // unisolated probe writes the caller's workspace (in tests, a temp fixture) into the
+  // developer's real `~/.oma`.
+  const probeHome = mkdtempSync(join(tmpdir(), "oma-probe-home-"));
   try {
     const result = spawnSync(process.execPath, [serverPath], {
       input: requests,
       encoding: "utf8",
       timeout: 25_000,
       windowsHide: true,
-      env: { ...process.env, OMA_WORKSPACE_ROOT: workspaceRoot },
+      env: { ...process.env, OMA_WORKSPACE_ROOT: workspaceRoot, OMA_HOME: probeHome },
     });
     stdout = result.stdout ?? "";
     stderr = result.stderr ?? "";
   } catch (error) {
+    safeRemoveDirectory(probeHome);
     return {
       ok: false,
       serverPath,
@@ -582,6 +597,7 @@ function probeMcpServer(workspaceRoot: string): McpProbeAttestation {
   const handshakeProblems: string[] = [];
   const answered = new Set<number>();
   let sawNullId = false;
+  safeRemoveDirectory(probeHome);
 
   for (const line of stdout.split(/\r?\n/u)) {
     if (!line.trim()) continue;

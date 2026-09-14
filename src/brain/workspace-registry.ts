@@ -37,8 +37,17 @@ export interface ConversationBinding {
   boundAt: string;
 }
 
-export function omaHomeDir(homeDirectory: string = homedir()): string {
-  return join(homeDirectory, ".oma");
+/**
+ * OMA's per-user state root.
+ *
+ * `OMA_HOME` overrides it so a test suite never writes into the developer's real
+ * `~/.oma`: the registry and the capture journal are machine-wide by design, which is
+ * exactly why they must be redirectable.
+ */
+export function omaHomeDir(homeDirectory?: string): string {
+  const override = homeDirectory ?? process.env.OMA_HOME;
+  const base = override !== undefined && override.length > 0 ? override : homedir();
+  return join(base, ".oma");
 }
 
 export function workspaceRegistryPath(homeDirectory?: string): string {

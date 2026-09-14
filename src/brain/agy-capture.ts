@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 /**
  * AntiGravity capture primitives for the Neural Brain.
@@ -153,16 +153,18 @@ export function safeSegment(value: string): string {
   return cleaned.length > 0 ? cleaned : "unknown";
 }
 
-/** Global, project-agnostic staging root. Lives beside the Brain, not inside a project. */
-export function omaStagingDir(homeDirectory: string = homedir()): string {
-  return join(homeDirectory, ".oma", "staging");
+/**
+ * Global, project-agnostic staging root. Lives beside the Brain, not inside a project.
+ * `OMA_HOME` redirects it so tests never touch the developer's real capture journal.
+ */
+export function omaStagingDir(homeDirectory?: string): string {
+  const override = homeDirectory ?? process.env.OMA_HOME;
+  const base = override !== undefined && override.length > 0 ? override : homedir();
+  return join(base, ".oma", "staging");
 }
 
 export function stagingJournalPath(conversationId: string, homeDirectory?: string): string {
-  return join(
-    omaStagingDir(homeDirectory ?? homedir()),
-    `${safeSegment(conversationId)}.jsonl`,
-  );
+  return join(omaStagingDir(homeDirectory), `${safeSegment(conversationId)}.jsonl`);
 }
 
 /** Cursor of the last transcript step already folded into the Brain, per project. */
@@ -282,7 +284,7 @@ export function appendStagedRecord(
       const previous = lastRecordedStep(journalPath);
       if (previous !== null && record.stepIdx <= previous) return false;
     }
-    mkdirSync(omaStagingDir(homeDirectory ?? homedir()), { recursive: true });
+    mkdirSync(omaStagingDir(homeDirectory), { recursive: true });
     appendFileSync(journalPath, `${JSON.stringify(record)}\n`, "utf8");
     return true;
   } catch {
@@ -326,27 +328,6 @@ export function readStagedRecords(journalPath: string): StagedCaptureRecord[] {
     }
   }
   return records;
-}
-
-function containsPath(root: string, target: string): boolean {
-  const fromRoot = relative(resolve(root), resolve(target));
-  return (
-    fromRoot.length === 0 ||
-    (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot))
-  );
-}
-
-/**
- * Attribution rule: a record belongs to a workspace when one of its tool-call
- * paths lies inside that workspace. It is deliberately conservative — an
- * unattributable conversation is left in the journal rather than poured into the
- * wrong project.
- */
-export function isRecordAttributedTo(
-  record: StagedCaptureRecord,
-  workspaceRoot: string,
-): boolean {
-  return record.paths.some((path) => containsPath(workspaceRoot, path));
 }
 
 /** Read a transcript tolerantly; a missing or partial file yields an empty list. */

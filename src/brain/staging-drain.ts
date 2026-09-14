@@ -5,7 +5,6 @@ import { createFlashReformulator } from "./flash-summarizer.js";
 import { captureInteraction, type Reformulator } from "./summarizer.js";
 import {
   condenseTranscript,
-  isRecordAttributedTo,
   omaStagingDir,
   readStagedRecords,
   readStagingCursor,
@@ -16,7 +15,6 @@ import {
 import {
   bindConversation,
   readConversationBinding,
-  readRegisteredWorkspaces,
   sameWorkspacePath,
 } from "./workspace-registry.js";
 
@@ -71,18 +69,25 @@ type Attribution =
   | { kind: "unknown" };
 
 /**
- * Decide which project a captured conversation belongs to, by evidence only.
- *
- * Order matters, and every step is a statement rather than a guess:
+ * Decide which project a captured conversation belongs to, by **statement only**.
  *
  *  1. an existing conversation binding — exact, and never re-derived;
- *  2. the host's own `workspacePaths` for those steps — the host stating its workspace;
- *  3. a **unique** registered project among the paths the conversation touched.
+ *  2. the host's own `workspacePaths` for those steps — the host naming its workspace.
  *
- * The previous rule accepted a conversation as soon as *any* observed path fell inside
- * the draining workspace, which is how one project's records were poured into another:
- * an agent working in project B that reads a file in project A looks exactly like an
- * A conversation to that rule. Ambiguity is now refused and reported instead.
+ * Anything else is `unknown`, and the conversation stays in the journal.
+ *
+ * Two weaker rules were tried and removed, both measured:
+ *
+ *  * "any observed path inside the draining workspace" poured one project's records
+ *    into another, because an agent working in B that reads one file in A looks like an
+ *    A conversation to that rule;
+ *  * "the unique *registered* workspace among the observed paths" still misattributed.
+ *    On 2026-09-14 it bound the live IDE session of 2026-09-11 — a Symap conversation —
+ *    to the OMA checkout, because that checkout was the only registered root its paths
+ *    happened to touch (source `registry:OMA_WORKSPACE_ROOT`).
+ *
+ * A guess with a narrower aperture is still a guess. The registry is kept for reporting
+ * and for `oma memory bind`, which is where a human states the truth explicitly.
  */
 function resolveAttribution(
   conversationId: string,
@@ -97,9 +102,7 @@ function resolveAttribution(
       : { kind: "other-project", workspaceRoot: binding.workspaceRoot };
   }
 
-  const declared = [
-    ...new Set(records.flatMap((record) => record.workspacePaths ?? [])),
-  ];
+  const declared = [...new Set(records.flatMap((record) => record.workspacePaths ?? []))];
   if (declared.length === 1) {
     return sameWorkspacePath(declared[0], workspaceRoot)
       ? { kind: "this-project", source: "host-workspacePaths" }
@@ -107,17 +110,6 @@ function resolveAttribution(
   }
   if (declared.length > 1) return { kind: "ambiguous", candidates: declared };
 
-  const candidates = readRegisteredWorkspaces(homeDirectory).filter((registration) =>
-    records.some((record) => isRecordAttributedTo(record, registration.root)),
-  );
-  if (candidates.length > 1) {
-    return { kind: "ambiguous", candidates: candidates.map((candidate) => candidate.root) };
-  }
-  if (candidates.length === 1) {
-    return sameWorkspacePath(candidates[0].root, workspaceRoot)
-      ? { kind: "this-project", source: `registry:${candidates[0].source}` }
-      : { kind: "other-project", workspaceRoot: candidates[0].root };
-  }
   return { kind: "unknown" };
 }
 

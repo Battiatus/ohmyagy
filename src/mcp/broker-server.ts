@@ -82,6 +82,15 @@ export interface BrokerConfig {
    * the host's roots: an operator pin must not be silently overridden.
    */
   workspaceRootIsExplicit?: boolean;
+  /**
+   * Folds the capture journal into this project's Brain, called once per session as
+   * soon as a project is really bound. Injectable so a test can prove the trigger
+   * fires without spending a model call; the default runs the real drain.
+   *
+   * Never awaited by the caller: reformulating an exchange invokes a model, and the
+   * MCP handshake must not wait for it.
+   */
+  autoDrain?: (workspaceRoot: string) => Promise<unknown>;
 }
 
 /** Lazily open the Neural Brain so servers that never touch it create no file. */
@@ -179,6 +188,30 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
 
   const stagedRecords = new Map<string, StagedRecord>();
   const getBrain = createBrainAccessor(config);
+  const autoDrain =
+    config.autoDrain ??
+    (async (workspaceRoot: string): Promise<unknown> => {
+      const { drainStagedCapture } = await import("../brain/staging-drain.js");
+      return drainStagedCapture({ brain: getBrain(), workspaceRoot });
+    });
+  let drainStarted = false;
+
+  /**
+   * The mini-agent is supposed to pass over every exchange. Until now nothing ever
+   * folded the capture journal into the Brain: the only caller was the manual
+   * `oma memory drain` command, so memory never learned on its own.
+   *
+   * Runs at most once per session, after a project is really bound, and never blocks
+   * the handshake or a tool call.
+   */
+  const scheduleAutoDrain = (): void => {
+    if (drainStarted || process.env.OMA_AUTO_DRAIN === "off") return;
+    drainStarted = true;
+    void autoDrain(config.workspaceRoot).catch((error: unknown) => {
+      process.stderr.write(`OMA: automatic memory drain failed: ${messageOf(error)}\n`);
+    });
+  };
+
   // A broker given an explicit project publishes it immediately; a broker that only
   // guessed its cwd has no project to publish. Registration is what capture
   // attribution is decided against, so publishing a guess would defeat the point.
@@ -187,6 +220,7 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
     !describeWorkspace(config.workspaceRoot, config.workspaceRootSource).governsEditorInstall
   ) {
     registerWorkspace({ workspaceRoot: config.workspaceRoot, source: "OMA_WORKSPACE_ROOT" });
+    scheduleAutoDrain();
   }
   const pendingReplies = new Map<string | number, (message: JsonRpcMessage) => void>();
   let rootsRequestSeq = 0;
@@ -252,6 +286,7 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
     // workspaces that really did bind, which is what stops one project's records from
     // being poured into another.
     registerWorkspace({ workspaceRoot: usable[0], source: "roots/list" });
+    scheduleAutoDrain();
   };
 
   const clientDeclaresRoots = (request: JsonRpcRequest): boolean => {

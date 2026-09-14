@@ -509,9 +509,13 @@ function runMcp(root: string, messages: unknown[], _options?: unknown): unknown[
     env[key] = String(value);
   }
   const input = `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`;
+  // Redirect OMA's machine-wide state (capture journal, workspace registry) out of the
+  // developer's real ~/.oma: the broker drains the journal automatically at session
+  // start, so without this the suite would read and write the user's own capture store.
+  const omaHome = mkdtempSync(join(tmpdir(), "oma-broker-home-"));
   const result = spawnSync(command, args, {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...env, OMA_HOME: omaHome },
     input,
     encoding: "utf8",
     windowsHide: true,

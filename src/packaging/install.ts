@@ -2,6 +2,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -67,6 +68,8 @@ export function installWorkspacePlugin(
   if (existsSync(stagingDir)) {
     throw new Error(`Installer staging directory already exists: ${stagingDir}`);
   }
+
+  ensureOmaStateIgnored(workspace);
 
   mkdirSync(join(stagingDir, "rules"), { recursive: true });
   mkdirSync(join(stagingDir, "agents"), { recursive: true });
@@ -310,6 +313,37 @@ export function installWorkspacePlugin(
   }
 
   return { pluginDir, hookPath, mcpServerPath, gatesPath, agentsInstalled, skillsInstalled };
+}
+
+/**
+ * Make the project ignore OMA's own state directory.
+ *
+ * OMA writes `.oma/` at session start — the Brain, the graph, capture cursors. An
+ * untracked `.oma/` makes the Git tree dirty, which is exactly the precondition
+ * `snapshotCleanGitWorkspace` demands, so `propose_change` would refuse to stage
+ * anything in a project that does not already ignore the directory. Measured
+ * 2026-09-14: the broker's first automatic memory drain turned `git status
+ * --porcelain` from clean into `?? .oma/` in a fresh fixture.
+ *
+ * No-op outside a Git repository, and never rewrites an entry that is already there.
+ */
+function ensureOmaStateIgnored(workspaceRoot: string): void {
+  if (!existsSync(join(workspaceRoot, ".git"))) return;
+  const gitignorePath = join(workspaceRoot, ".gitignore");
+  let current = "";
+  try {
+    if (existsSync(gitignorePath)) current = readFileSync(gitignorePath, "utf8");
+  } catch {
+    return;
+  }
+  const existing = current.split(/\r?\n/u).map((line) => line.trim());
+  if (existing.includes(".oma/") || existing.includes(".oma/*")) return;
+  const separator = current.length === 0 || current.endsWith("\n") ? "" : "\n";
+  try {
+    writeFileSync(gitignorePath, `${current}${separator}.oma/\n`, "utf8");
+  } catch {
+    // An unwritable .gitignore costs a dirty tree, never correctness of the install.
+  }
 }
 
 function deployCoreAgents(stagingDir: string): void {

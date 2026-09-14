@@ -18,7 +18,7 @@ import {
 } from "../agy-capture.js";
 import { drainStagedCapture } from "../staging-drain.js";
 import { BrainStore } from "../brain-store.js";
-import { bindConversation, registerWorkspace } from "../workspace-registry.js";
+import { bindConversation } from "../workspace-registry.js";
 
 /**
  * Regression guard for the capture refonte. The previous implementation read a
@@ -127,14 +127,11 @@ describe("AGY payload capture", () => {
     }
   });
 
-  test("attribution is conservative: no paths means no project", () => {
-    const workspace = join(tmpdir(), "a-workspace");
-    const inside = { at: "", conversationId: "c", stepIdx: 1, tool: "view_file", failed: false, paths: [join(workspace, "src", "x.ts")] };
-    const outside = { ...inside, paths: [join(tmpdir(), "elsewhere", "y.ts")] };
-    const noPaths = { ...inside, paths: [] as string[] };
-    assert.equal(isRecordAttributedTo(inside, workspace), true);
-    assert.equal(isRecordAttributedTo(outside, workspace), false);
-    assert.equal(isRecordAttributedTo(noPaths, workspace), false);
+  test("the capture layer exposes no path-based attribution helper", async () => {
+    // "Does one of your paths fall inside my workspace" is the rule that poured one
+    // project's records into another. A guard keeps it from quietly coming back.
+    const capture = await import("../agy-capture.js");
+    assert.equal("isRecordAttributedTo" in capture, false);
   });
 });
 
@@ -189,8 +186,13 @@ describe("drain: attribution, condensation and idempotence", () => {
       );
 
       // One conversation this project owns, one that belongs elsewhere and one with
-      // no evidence at all. Only the first may be poured; the other two stay.
-      registerWorkspace({ workspaceRoot: workspace, source: "test", homeDirectory: home });
+      // no statement at all. Only the first may be poured; the other two stay.
+      bindConversation({
+        conversationId: "conv-symap",
+        workspaceRoot: workspace,
+        source: "test",
+        homeDirectory: home,
+      });
       appendStagedRecord(
         { at: new Date().toISOString(), conversationId: "conv-symap", stepIdx: 2, tool: "view_file", failed: false, paths: [projectFile], workspacePaths: [], transcriptPath },
         home,
@@ -307,7 +309,7 @@ describe("drain: attribution, condensation and idempotence", () => {
     }
   });
 
-  test("evidence naming several projects is refused instead of guessed", async () => {
+  test("a conversation the host places in two projects is refused instead of guessed", async () => {
     const home = makeTempRoot();
     const workspaceA = makeTempRoot();
     const workspaceB = makeTempRoot();
@@ -317,16 +319,20 @@ describe("drain: attribution, condensation and idempotence", () => {
       const fileB = join(workspaceB, "b.ts");
       writeFileSync(fileA, "a\n", "utf8");
       writeFileSync(fileB, "b\n", "utf8");
-      registerWorkspace({ workspaceRoot: workspaceA, source: "test", homeDirectory: home });
-      registerWorkspace({ workspaceRoot: workspaceB, source: "test", homeDirectory: home });
       const transcriptPath = join(workspaceA, "transcript_full.jsonl");
       writeFileSync(
         transcriptPath,
         `${JSON.stringify({ type: "USER_INPUT", step_index: 1, content: "ambigu" })}\n`,
         "utf8",
       );
+      // The host names a different workspace on two steps of the same conversation: the
+      // evidence contradicts itself, so nothing may be written.
       appendStagedRecord(
-        { at: new Date().toISOString(), conversationId: "conv-ambiguous", stepIdx: 1, tool: "view_file", failed: false, paths: [fileA, fileB], workspacePaths: [], transcriptPath },
+        { at: new Date().toISOString(), conversationId: "conv-ambiguous", stepIdx: 1, tool: "view_file", failed: false, paths: [fileA], workspacePaths: [workspaceA], transcriptPath },
+        home,
+      );
+      appendStagedRecord(
+        { at: new Date().toISOString(), conversationId: "conv-ambiguous", stepIdx: 2, tool: "view_file", failed: false, paths: [fileB], workspacePaths: [workspaceB], transcriptPath },
         home,
       );
 

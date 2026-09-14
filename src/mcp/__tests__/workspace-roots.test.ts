@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "bun:test";
+import { appendStagedRecord } from "../../brain/agy-capture.js";
+import { bindConversation } from "../../brain/workspace-registry.js";
 
 /**
  * The invariant this file exists to protect: **a session's project identity comes
@@ -49,7 +52,7 @@ function makeProject(): string {
 function startBroker(
   cwd: string,
   roots: readonly string[],
-  options: { home?: string } = {},
+  options: { home?: string; env?: Record<string, string> } = {},
 ): InteractiveBroker {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -61,6 +64,7 @@ function startBroker(
     env.USERPROFILE = options.home;
     env.HOME = options.home;
   }
+  Object.assign(env, options.env ?? {});
   const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [brokerSource], {
     cwd,
     env,
@@ -127,6 +131,95 @@ function cleanup(...dirs: readonly string[]): void {
     }
   }
 }
+
+interface BrainSummary {
+  projects: number;
+  sessions: number;
+  roots: string[];
+  sessionIds: string[];
+}
+
+/** Read a Brain read-only. Throws while the file is still being created. */
+function readBrain(brainPath: string): BrainSummary {
+  const db = new DatabaseSync(brainPath, { readOnly: true });
+  try {
+    const roots = (
+      db.prepare("SELECT root_path FROM projects").all() as Array<{ root_path: string }>
+    ).map((row) => row.root_path);
+    const sessionIds = (
+      db.prepare("SELECT id FROM sessions").all() as Array<{ id: string }>
+    ).map((row) => row.id);
+    return { projects: roots.length, sessions: sessionIds.length, roots, sessionIds };
+  } finally {
+    db.close();
+  }
+}
+
+/** Wait until the automatic drain has persisted `expected` sessions in this project. */
+async function waitForSessions(
+  brainPath: string,
+  expected: number,
+  stderr: () => string,
+): Promise<BrainSummary> {
+  const deadline = Date.now() + 120_000;
+  let last: BrainSummary = { projects: 0, sessions: 0, roots: [], sessionIds: [] };
+  while (Date.now() < deadline) {
+    if (existsSync(brainPath)) {
+      try {
+        last = readBrain(brainPath);
+        if (last.sessions >= expected) return last;
+      } catch {
+        // The file exists but is not yet readable as a database.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  assert.fail(
+    `expected ${expected} session(s) in ${brainPath}, saw ${last.sessions}; stderr: ${stderr()}`,
+  );
+}
+
+/**
+ * Capture one exchange for `project` under a throwaway home, bound to that project.
+ * This is the state the drain has to work from in production.
+ */
+function stageBoundConversation(
+  home: string,
+  project: string,
+  conversationId: string,
+): void {
+  const transcriptPath = join(project, "transcript_full.jsonl");
+  writeFileSync(
+    transcriptPath,
+    [
+      JSON.stringify({ type: "USER_INPUT", step_index: 1, content: "Quel est le statut ?" }),
+      JSON.stringify({ type: "PLANNER_RESPONSE", step_index: 2, thinking: "j'inspecte les bases" }),
+    ].join("\n") + "\n",
+    "utf8",
+  );
+  appendStagedRecord(
+    {
+      at: new Date().toISOString(),
+      conversationId,
+      stepIdx: 2,
+      tool: "view_file",
+      failed: false,
+      paths: [join(project, "a.ts")],
+      workspacePaths: [],
+      transcriptPath,
+    },
+    home,
+  );
+  bindConversation({
+    conversationId,
+    workspaceRoot: project,
+    source: "test",
+    homeDirectory: home,
+  });
+}
+
+/** A deliberately unknown model keeps these tests free of a real model call. */
+const NO_MODEL: Record<string, string> = { OMA_FLASH_MODEL: "definitely-not-a-model" };
 
 test("the host's roots decide the project, not the directory the editor used as cwd", { timeout: 120_000 }, async () => {
   const editorInstall = makeEditorInstall();
@@ -209,3 +302,81 @@ test("several host roots are never resolved by guessing", { timeout: 120_000 }, 
     cleanup(first, second, editorInstall);
   }
 });
+
+test("the capture journal is folded into the project automatically once roots bind", { timeout: 180_000 }, async () => {
+  const editorInstall = makeEditorInstall();
+  const project = makeProject();
+  const home = mkdtempSync(join(tmpdir(), "oma-home-"));
+  stageBoundConversation(home, project, "conv-autodrain");
+
+  const broker = startBroker(editorInstall, [project], { home, env: NO_MODEL });
+  try {
+    await broker.request(1, "initialize", initializeParams());
+    const summary = await waitForSessions(
+      join(project, ".oma", "brain.sqlite"),
+      1,
+      broker.stderr,
+    );
+    assert.equal(summary.projects, 1, `expected one project; stderr: ${broker.stderr()}`);
+    assert.equal(summary.roots.length, 1, `project root: ${summary.roots.join(", ")}`);
+  } finally {
+    broker.close();
+    cleanup(project, editorInstall, home);
+  }
+});
+
+test("two projects each get their own brain and never share a session", { timeout: 240_000 }, async () => {
+  const editorInstall = makeEditorInstall();
+  const home = mkdtempSync(join(tmpdir(), "oma-home-"));
+  const projectA = makeProject();
+  const projectB = makeProject();
+  stageBoundConversation(home, projectA, "conv-project-a");
+  stageBoundConversation(home, projectB, "conv-project-b");
+
+  const brokerA = startBroker(editorInstall, [projectA], { home, env: NO_MODEL });
+  const brokerB = startBroker(editorInstall, [projectB], { home, env: NO_MODEL });
+  const brainA = join(projectA, ".oma", "brain.sqlite");
+  const brainB = join(projectB, ".oma", "brain.sqlite");
+  try {
+    await brokerA.request(1, "initialize", initializeParams());
+    await brokerB.request(1, "initialize", initializeParams());
+
+    const summaryA = await waitForSessions(brainA, 1, brokerA.stderr);
+    const summaryB = await waitForSessions(brainB, 1, brokerB.stderr);
+
+    // Each project owns exactly one project row, pointing at its own root.
+    assert.equal(summaryA.projects, 1);
+    assert.equal(summaryB.projects, 1);
+    assert.equal(samePath(summaryA.roots[0], projectA), true, summaryA.roots.join(", "));
+    assert.equal(samePath(summaryB.roots[0], projectB), true, summaryB.roots.join(", "));
+
+    // And no session is shared: this is the isolation the whole Brain design rests on.
+    assert.equal(summaryA.sessionIds.length, 1);
+    assert.equal(summaryB.sessionIds.length, 1);
+    assert.notEqual(summaryA.sessionIds[0], summaryB.sessionIds[0]);
+    assert.equal(existsSync(brainA), true);
+    assert.equal(existsSync(brainB), true);
+
+    // The registry knows both projects, so later attribution has a bounded set to
+    // decide against instead of "does this touch my root".
+    const registry = JSON.parse(
+      readFileSync(join(home, ".oma", "workspaces.json"), "utf8"),
+    ) as Array<{ root: string; source: string }>;
+    assert.equal(registry.length, 2, JSON.stringify(registry));
+    assert.deepEqual(
+      registry.map((entry) => entry.source),
+      ["roots/list", "roots/list"],
+    );
+  } finally {
+    brokerA.close();
+    brokerB.close();
+    cleanup(projectA, projectB, editorInstall, home);
+  }
+});
+
+function samePath(left: string | undefined, right: string): boolean {
+  if (left === undefined) return false;
+  const normalize = (value: string): string =>
+    process.platform === "win32" ? resolve(value).toLocaleLowerCase("en-US") : resolve(value);
+  return normalize(left) === normalize(right);
+}

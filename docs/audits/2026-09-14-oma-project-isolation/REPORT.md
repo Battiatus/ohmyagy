@@ -85,15 +85,63 @@ installation directory is refused with a message naming the root and its source,
 that a real workspace carrying no marker at all (Symap: no `.git`, no `package.json`)
 is never mistaken for an install tree.
 
+## Addendum — what running the new pipeline actually exposed
+
+Four corrections came out of exercising the fixes rather than reasoning about them.
+
+1. **The registry inference still misattributed, so it is gone.** The first version fell
+   back to "the unique *registered* workspace among the paths the conversation touched".
+   On 2026-09-14 it bound the live IDE session of 2026-09-11 — a Symap conversation — to
+   the OMA checkout, because that checkout was the only registered root the conversation's
+   paths happened to touch (`source: registry:OMA_WORKSPACE_ROOT` in
+   `~/.oma/conversations/ba9c4b1e-….json`). A guess with a narrower aperture is still a
+   guess. Attribution is now statements only: an existing binding, or the host's own
+   `workspacePaths`. Everything else stays in the journal. The `isRecordAttributedTo`
+   helper is deleted, and a guard test asserts the capture layer never exposes a
+   path-based attribution helper again.
+
+2. **The host does state the workspace.** A real session on 2026-09-14 bound
+   `8a411c18-c85b-4358-b338-761881ca7d51` to `C:\Users\User\Documents\Repos\Symap` with
+   `source: host-workspacePaths`, written by the PostToolUse hook at 13:41 local. The
+   `workspacePaths: []` measured on the CLI probe is therefore not universal: when the
+   host states a workspace, the hook binds the conversation exactly and the drain needs no
+   inference at all.
+
+3. **OMA's own state directory broke OMA's own `propose_change`.** The automatic drain
+   creates `.oma/` at session start, which made a fresh Git fixture dirty
+   (`?? .oma/`), and a dirty tree is exactly what `snapshotCleanGitWorkspace` refuses. The
+   installer never added an ignore entry. `installWorkspacePlugin` now ensures `.oma/` is
+   ignored in Git workspaces (`ensureOmaStateIgnored`), so the 2PC path cannot be broken by
+   OMA's own presence.
+
+4. **The test suite was writing into the developer's real `~/.oma`.** The registry had
+   accumulated ~80 temp fixture roots, and `probeMcpServer` spawned the broker with the
+   caller's workspace and no isolation. `OMA_HOME` now redirects OMA's machine-wide state,
+   the broker's probe uses a throwaway home, and the suite leaves the real registry empty —
+   verified after a full run.
+
+### Layer 1 verified
+
+- **The drain fires by itself.** After the host answers `roots/list`, the broker folds the
+  capture journal into that project with no manual command: one project, one session.
+- **Isolation holds across two projects.** Two brokers, two bound conversations, two
+  brains: each brain has exactly one `projects` row pointing at its own root, and the two
+  session ids differ. The registry lists both with `source: roots/list`.
+- **The reformulator works** (proved separately in
+  `docs/audits/2026-09-14-oma-agent-execution/`).
+
+Full suite: **402 pass, 5 skip, 0 fail**.
+
 ## Still open
 
-- **Whether AntiGravity answers `roots/list` is unverified.** The capability is present
-  in the 1.2.1 binary beside `tools/list`, but only an IDE run can confirm it. If the
-  host stays silent, OMA now refuses every tool instead of answering about the wrong
-  project — a deliberate trade. `doctor`'s `workspace.source` shows which happened:
-  `roots/list` means the host answered; `process.cwd` means it did not.
-- `~/.oma/staging` is still one directory for every session and every project, and the
-  PostToolUse hook runs with `workspacePaths: []`, so it cannot know which project it
-  captured.
-- The `antigravity` brain's 23 entries must be archived, then that file removed: it is
-  the editor's install tree, not a project.
+- **Whether AntiGravity answers `roots/list` in the IDE is unverified end to end.** The
+  capability is present in the 1.2.1 binary beside `tools/list`, but only an IDE run can
+  confirm it. `doctor`'s `workspace.source` shows which happened: `roots/list` means the
+  host answered; `process.cwd` means it did not, and OMA now refuses every tool rather than
+  answering about the wrong project.
+- `~/.oma/staging` is still one flat directory for every session. Attribution is now exact
+  when the host states a workspace, but the journals themselves are not partitioned.
+- Conversations captured before this change are unbound and will never drain on their own.
+  `oma memory bind <conversationId> --workspace <root>` is the explicit recovery.
+- The `antigravity` brain's 23 entries still need purging once the IDE runs against a real
+  workspace; the JSON archive beside this report preserves them.
