@@ -37,6 +37,26 @@ accepted) reported as `budget_exhausted`.
 - **No silent bookkeeping.** `recordEngineProblem` reports a transition that cannot be
   recorded; that is precisely what used to go unnoticed.
 
+## The repair edge, and what it exposed
+
+A repair wave declares `dependsOn` the nodes that failed the previous one, with
+`when: "failure"`. Attaching that edge immediately showed the graph was lying: the repair node
+projected as **`skipped`**, because the wave-1 node had been completed as `succeeded` from the
+**worker's** status even though its gate rejected the result. With the graph believing wave 1
+passed, a failure edge could never activate the repair — while the repair's own patch was the
+thing that fixed the code.
+
+The completion is now recorded **after the gate**, for the whole wave at once, with the outcome
+the gate decided. Measured on the phase-4 scenario:
+
+```
+graph nodes: bootstrap(synthetic, succeeded)  work-…-w1(failed)  work-…-fix-w2(succeeded)
+graph edges: 1                      projection status: succeeded
+```
+
+Wave 1 failed its gate, the repair depends on that failure, and the repair is the node that
+delivered. The graph now says why the second wave exists.
+
 ## Verified
 
 `npm test`: **427 pass, 2 skip, 0 fail**, exit 0. The two remaining skips are the opt-in real
@@ -48,16 +68,3 @@ Re-enabled and green:
 - **Gate 6.1–6.3** — paired and repeated benchmark across four frozen variants produces causal
   conclusions.
 - **BenchmarkRunner** — multi-trial benchmark across all four variants with genuine metrics.
-
-Measured on the phase-4 scenario (`.oma/diagnose-phase4.mjs`): the graph now holds
-`bootstrap` (synthetic, succeeded), `work-src-math-ts-w1` and `work-src-math-fix-ts-w2`, both
-deliverable and succeeded, and `projection status: succeeded` at wave 2 with an integrated
-commit.
-
-## Known gap, stated rather than papered over
-
-The repair edge is wired to **worker-level** failures. In the phase-4 scenario the wave-1 worker
-succeeds and the *gate* fails, so `previousWaveFailures` is empty and no edge is created — the
-measured graph has `edges: 0`. The mission still converges (the repair node is a root and
-delivers), but the graph does not yet express "wave 2 repairs wave 1's gate failure". Deriving
-failed nodes from the judge's per-item outcome instead of from worker status is the next step.

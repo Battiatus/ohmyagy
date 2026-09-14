@@ -397,10 +397,9 @@ export class DynamicConvergenceEngine {
       activeItemsInput = parsedItems;
     }
 
-    // Nodes that failed in the previous wave. A repair wave attaches to them, so the graph
+    // Nodes that failed the previous wave's gate. A repair wave attaches to them, so the graph
     // says why the new work exists instead of showing a set of unrelated roots.
     let previousWaveFailures: string[] = [];
-    let failedNodeIds: string[] = [];
 
     while (currentWave <= limits.maxRounds) {
       const waveStartTime = Date.now();
@@ -467,6 +466,10 @@ export class DynamicConvergenceEngine {
           acceptanceCriteria: ["clean_diff", "tests_pass"],
         });
       }
+
+      const waveNodeIds = materialized.map((item) => item.workItemId);
+      // Completed at the end of the wave, once the gate has spoken.
+      const waveCompleted: Array<{ nodeId: string; evidenceHash: string }> = [];
 
       // Add this wave's work items to the graph BEFORE any transition names them. The
       // transitions used to run against nodes that had never been added, inside a
@@ -605,32 +608,18 @@ export class DynamicConvergenceEngine {
 
         // Close the node in the graph. The node now exists — materialization above added it —
         // so this transition is what makes a completed work item visible to the projection.
-        if (!isWorkerSuccess) failedNodeIds.push(mat.workItemId);
-        if (graphRuntime && projectedStateOf(graphRuntime, mat.workItemId) === "running") {
-          try {
-            appendGraphTransition(graphRuntime, {
-              eventType: "node_completed",
-              nodeId: mat.workItemId,
-              dispatchId: `disp-${mat.workItemId}`,
-              outcome: isWorkerSuccess ? "success" : "failure",
-              authority: "broker",
-              authorityId: "oma-dynamic-engine",
-              evidenceHash: diffHash,
-            });
-          } catch (error) {
-            recordEngineProblem(error, `node_completed ${mat.workItemId}`);
-          }
-        }
+        // The node's completion is recorded after the gate, not here: a clean diff the
+        // objective judge rejects is a failed node, and saying otherwise is what made a repair
+        // node look `skipped`.
+        waveCompleted.push({ nodeId: mat.workItemId, evidenceHash: diffHash });
 
         try {
           await worktreePool.release(mat.workItemId, true);
         } catch {}
       }
 
-      // The next wave repairs what failed in this one, so the list is rotated here rather
-      // than accumulated across waves.
-      previousWaveFailures = failedNodeIds;
-      failedNodeIds = [];
+      // The next wave repairs what this one failed to pass; the gate outcome decides that,
+      // further down, from `waveCompleted`.
 
       // 3. Dual Adversarial Independent Reviews
       for (const prop of waveProposals) {
@@ -814,6 +803,33 @@ export class DynamicConvergenceEngine {
 
       // 5. Convergence Evaluation via extracted pure engine (T3.3)
       const isIntegratedSuccess = judgeVerdict.status === "approved" && integration.status === "integrated";
+
+      // Complete the wave's nodes HERE, not in the worker loop: the outcome that matters is
+      // the gate's, not the worker's. A worker can produce a clean diff that the objective judge
+      // still rejects, and completing the node as `succeeded` in that case made the graph
+      // believe the wave passed — so a repair node linked by a `when: "failure"` edge was
+      // projected as `skipped` while its patch was the one that actually fixed the code.
+      for (const entry of waveCompleted) {
+        if (graphRuntime === undefined) break;
+        if (projectedStateOf(graphRuntime, entry.nodeId) !== "running") continue;
+        try {
+          appendGraphTransition(graphRuntime, {
+            eventType: "node_completed",
+            nodeId: entry.nodeId,
+            dispatchId: `disp-${entry.nodeId}`,
+            outcome: isIntegratedSuccess ? "success" : "failure",
+            authority: "broker",
+            authorityId: "oma-dynamic-engine",
+            evidenceHash: entry.evidenceHash,
+          });
+        } catch (error) {
+          recordEngineProblem(error, `node_completed ${entry.nodeId}`);
+        }
+      }
+      if (!isIntegratedSuccess) {
+        previousWaveFailures = waveCompleted.map((entry) => entry.nodeId);
+      }
+
       const stepEvaluation = evaluateConvergenceStep({
         graph: graphRuntime?.graph ?? {
           schemaVersion: 1,
@@ -927,6 +943,7 @@ export class DynamicConvergenceEngine {
         : true;
 
       const nextWave = currentWave + 1;
+
       MissionEventsStore.appendEvent(eventsPath, missionId, {
         type: "wave_transitioned",
         fromWave: currentWave,
