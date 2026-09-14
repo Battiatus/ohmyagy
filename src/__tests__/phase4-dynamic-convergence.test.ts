@@ -25,28 +25,22 @@ describe("Phase 4 — Dynamic Workflow, Convergence & Gate Observable", () => {
     pipeline: originalPipeline,
   };
 
-  // SUSPENDED, with a measured reason rather than the speculative one this comment used to
-  // carry ("the engine emits no graph edges"). Un-suspending it produced a concrete answer,
-  // and diagnosing it found one defect that is now fixed and one that remains:
+  // Gate 4.1 was suspended twice. The first reason was speculative ("the engine emits no
+  // graph edges"); the second was measured, and both causes it named are now fixed:
   //
-  //   MEASURED 2026-09-14: the engine reaches green progress — 0 hidden/visible tests
-  //   failing, 0 gate failures, 1/1 work items accepted — and still reports
-  //   `budget_exhausted` after 3 waves.
-  //
-  //   FIXED: the engine hand-wrote its revision-1 graph as
-  //   `{schemaVersion, graphId, revision, nodes: [], edges: []}`. `parseExecutionGraph`
-  //   rejects that twice (no `schedulerAuthorityId`, and an empty `nodes` array), and a
-  //   `catch {}` swallowed the parse error, so the engine ran with an empty fallback graph.
-  //   Both orchestrators now build the graph through `src/graph/bootstrap.ts`, and the
-  //   engine throws instead of continuing without one.
-  //
-  //   REMAINING (this is what keeps the test suspended): the engine appends
-  //   `node_dispatched` for each work item inside `try {} catch {}`, but never adds those
-  //   work items to the graph — it only ever holds the synthetic seed. A graph with no
-  //   deliverable node cannot be `succeeded`, which is correct, so the mission exhausts its
-  //   budget. Re-enable once the engine materializes work items (and repair edges) as graph
-  //   nodes — not by relaxing the success contract.
-  it.skip("Gate 4.1 & 4.2: Red gate in wave 1 triggers dynamic wave 2 which converges to green with new Runs & diagnostics", async () => {
+  //   1. The engine hand-wrote a revision-1 graph that `parseExecutionGraph` rejects (no
+  //      `schedulerAuthorityId`, empty `nodes`) behind a `catch {}`, so it ran with an empty
+  //      fallback graph. Both orchestrators now build through `src/graph/bootstrap.ts`, and
+  //      the engine throws rather than continuing without a graph.
+  //   2. It emitted `node_dispatched` / `node_completed` for work items it had never added to
+  //      the graph, inside `try {} catch {}`. `src/graph/materialize.ts` now adds each wave's
+  //      work items — and a repair wave's edges to the nodes that failed — through the same
+  //      GraphBroker proposal path as `graph_replan`, and a rejected transition is reported
+  //      instead of discarded.
+  //   3. Its own synthetic seed stayed `ready` forever, which kept the projection out of a
+  //      terminal state even when every real node had succeeded. The engine now retires the
+  //      seed the way `graph_init` does.
+  it("Gate 4.1 & 4.2: Red gate in wave 1 triggers dynamic wave 2 which converges to green with new Runs & diagnostics", async () => {
     const testDir = join(process.cwd(), ".oma", "test-phase4-converge");
     rmSync(testDir, { recursive: true, force: true });
     mkdirSync(testDir, { recursive: true });

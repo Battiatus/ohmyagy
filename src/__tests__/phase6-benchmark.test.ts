@@ -16,7 +16,7 @@ describe("Phase 6 — Benchmark Causal (Gate Observable)", () => {
   // cannot express "wave 2 repairs wave 1" and a repaired failure stays a failed
   // sink. Aligning that engine's graph bookkeeping is the unification work
   // (finding C6); it must not be fixed by weakening the success contract.
-  it.skip("Gate 6.1, 6.2 & 6.3: Automated paired & repeated benchmark across 4 frozen variants produces causal conclusions", { timeout: 180_000 }, async () => {
+  it("Gate 6.1, 6.2 & 6.3: Automated paired & repeated benchmark across 4 frozen variants produces causal conclusions", { timeout: 180_000 }, async () => {
     const testDir = join(process.cwd(), ".oma", "test-phase6-benchmark");
     rmSync(testDir, { recursive: true, force: true });
     mkdirSync(testDir, { recursive: true });

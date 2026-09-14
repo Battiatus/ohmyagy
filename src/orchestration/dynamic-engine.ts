@@ -35,7 +35,8 @@ import {
   type LoadedGraphRuntime,
 } from "../graph/store.js";
 import { projectGraph } from "../graph/kernel.js";
-import { buildInitialExecutionGraph } from "../graph/bootstrap.js";
+import { BOOTSTRAP_NODE_ID, buildInitialExecutionGraph } from "../graph/bootstrap.js";
+import { materializeWorkItemNodes } from "../graph/materialize.js";
 import type { GraphProposal } from "../graph/proposal.js";
 import * as originalMath from "../../test-fixtures/minimal-pipeline/src/math.js";
 import * as originalParser from "../../test-fixtures/minimal-pipeline/src/parser.js";
@@ -47,6 +48,37 @@ import {
 } from "./convergence-step.js";
 
 export type { DynamicWorkflowLimits };
+
+/**
+ * The projected state of a node, or undefined when the graph has no such node.
+ *
+ * The engine can be run more than once against the same workspace — a benchmark runs four
+ * variants over shared fixtures — and node ids are deterministic, so a second run finds nodes
+ * the first run already completed. Emitting `node_dispatched` for a succeeded node is a
+ * rejected transition (`Node x is succeeded, not ready`), not an error worth reporting: the
+ * graph is simply further along than this run assumed.
+ */
+function projectedStateOf(runtime: LoadedGraphRuntime, nodeId: string): string | undefined {
+  try {
+    return projectGraph(runtime.graph, verifyGraphStore(runtime).events).nodes.find(
+      (node) => node.id === nodeId,
+    )?.state;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Report a graph bookkeeping failure instead of swallowing it.
+ *
+ * The engine's transitions used to sit inside `try {} catch {}`. That is how it emitted
+ * `node_dispatched` and `node_completed` for nodes it had never added: every rejection was
+ * discarded, and the only symptom was a mission that could not converge.
+ */
+function recordEngineProblem(error: unknown, context: string): void {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`OMA dynamic engine: ${context} failed: ${message}\n`);
+}
 
 export interface DynamicEngineOptions {
   workspaceRoot: string;
@@ -203,6 +235,36 @@ export class DynamicConvergenceEngine {
       );
     }
 
+    // Retire the engine's own seed. It exists only so revision 1 has a parent for the first
+    // proposal; left `ready` it keeps the graph out of a terminal state forever, so a mission
+    // whose real nodes had all succeeded still projected as `ready` and exhausted its budget.
+    // `graph_init` already retires its seed this way.
+    //
+    // Only when it is still `ready`: a benchmark runs the engine repeatedly against the same
+    // workspace, and a second retirement attempt on an already-succeeded seed is a rejected
+    // transition (`Node bootstrap is succeeded, not ready`), not a no-op.
+    const seedState = projectGraph(graphRuntime.graph, verifyGraphStore(graphRuntime).events)
+      .nodes.find((node) => node.id === BOOTSTRAP_NODE_ID)?.state;
+    if (seedState === "ready") {
+      const seedDispatchId = "dispatch-bootstrap";
+      appendGraphTransition(graphRuntime, {
+        eventType: "node_dispatched",
+        nodeId: BOOTSTRAP_NODE_ID,
+        dispatchId: seedDispatchId,
+        authorityId: graphRuntime.graph.schedulerAuthorityId,
+      });
+      appendGraphTransition(graphRuntime, {
+        eventType: "node_completed",
+        nodeId: BOOTSTRAP_NODE_ID,
+        dispatchId: seedDispatchId,
+        authority: "scheduler",
+        authorityId: graphRuntime.graph.schedulerAuthorityId,
+        outcome: "success",
+        evidenceHash: sha256(`bootstrap:${missionId}`),
+      });
+      graphRuntime = loadGraphRuntime(workspaceRoot);
+    }
+
     // 0. Start Mission & Journal Entry
     MissionEventsStore.appendEvent(eventsPath, missionId, {
       type: "mission_started",
@@ -335,6 +397,11 @@ export class DynamicConvergenceEngine {
       activeItemsInput = parsedItems;
     }
 
+    // Nodes that failed in the previous wave. A repair wave attaches to them, so the graph
+    // says why the new work exists instead of showing a set of unrelated roots.
+    let previousWaveFailures: string[] = [];
+    let failedNodeIds: string[] = [];
+
     while (currentWave <= limits.maxRounds) {
       const waveStartTime = Date.now();
 
@@ -399,17 +466,47 @@ export class DynamicConvergenceEngine {
           roleRequired: currentWave === 1 ? "executor" : "fixer",
           acceptanceCriteria: ["clean_diff", "tests_pass"],
         });
+      }
 
-        // Register node into Graph DAG
-        if (graphRuntime) {
+      // Add this wave's work items to the graph BEFORE any transition names them. The
+      // transitions used to run against nodes that had never been added, inside a
+      // `try {} catch {}`, so they silently did nothing and the graph held only the
+      // synthetic seed — a graph that can never be `succeeded`.
+      if (graphRuntime) {
+        const materializedNodes = materializeWorkItemNodes({
+          workspaceRoot,
+          missionId,
+          items: materialized.map((item) => ({
+            id: item.workItemId,
+            title: item.title,
+            scope: item.filesModified,
+            persona: currentWave === 1 ? "executor" : "fixer",
+            // A repair wave attaches to the nodes that failed in the previous one, so the
+            // graph expresses why the new work exists instead of listing isolated roots.
+            ...(currentWave > 1 && previousWaveFailures.length > 0
+              ? { dependsOn: [...previousWaveFailures], dependencyWhen: "failure" as const }
+              : {}),
+          })),
+        });
+        if (materializedNodes.added.length > 0) {
+          // The runtime we hold predates the revision bump the broker just committed;
+          // transitions against a stale revision are rejected.
+          graphRuntime = loadGraphRuntime(workspaceRoot);
+        }
+        for (const item of materialized) {
+          if (projectedStateOf(graphRuntime, item.workItemId) !== "ready") continue;
           try {
             appendGraphTransition(graphRuntime, {
               eventType: "node_dispatched",
-              nodeId: workItemId,
-              dispatchId: `disp-${workItemId}`,
+              nodeId: item.workItemId,
+              dispatchId: `disp-${item.workItemId}`,
               authorityId: "oma-dynamic-engine",
             });
-          } catch {}
+          } catch (error) {
+            // Never silent: a transition that cannot be recorded means the graph and the
+            // mission disagree, and that is exactly what used to go unnoticed.
+            recordEngineProblem(error, `node_dispatched ${item.workItemId}`);
+          }
         }
       }
 
@@ -506,12 +603,10 @@ export class DynamicConvergenceEngine {
           stagedDiffDigest: diffHash,
         });
 
-        // Close the node in the graph. Until this existed the engine only ever
-        // emitted `node_dispatched`, so its projection could never reach
-        // `succeeded` and convergence silently depended on the caller asserting
-        // `isIntegrated: true` — the bypass that let a mission be declared
-        // successful with no delivered work recorded in its own graph.
-        if (graphRuntime) {
+        // Close the node in the graph. The node now exists — materialization above added it —
+        // so this transition is what makes a completed work item visible to the projection.
+        if (!isWorkerSuccess) failedNodeIds.push(mat.workItemId);
+        if (graphRuntime && projectedStateOf(graphRuntime, mat.workItemId) === "running") {
           try {
             appendGraphTransition(graphRuntime, {
               eventType: "node_completed",
@@ -522,13 +617,20 @@ export class DynamicConvergenceEngine {
               authorityId: "oma-dynamic-engine",
               evidenceHash: diffHash,
             });
-          } catch {}
+          } catch (error) {
+            recordEngineProblem(error, `node_completed ${mat.workItemId}`);
+          }
         }
 
         try {
           await worktreePool.release(mat.workItemId, true);
         } catch {}
       }
+
+      // The next wave repairs what failed in this one, so the list is rotated here rather
+      // than accumulated across waves.
+      previousWaveFailures = failedNodeIds;
+      failedNodeIds = [];
 
       // 3. Dual Adversarial Independent Reviews
       for (const prop of waveProposals) {

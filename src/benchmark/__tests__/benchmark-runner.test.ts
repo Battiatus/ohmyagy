@@ -25,7 +25,7 @@ describe("BenchmarkRunner Unit & Causal Validation Suite", () => {
   // engine's report, and that engine could only ever report success through the
   // `isIntegrated` bypass the success contract now refuses. Re-enable together
   // with the engine's graph alignment (finding C6).
-  it.skip("executes multi-trial benchmark across all 4 variants with genuine metrics", { timeout: 30000 }, async () => {
+  it("executes multi-trial benchmark across all 4 variants with genuine metrics", { timeout: 30000 }, async () => {
     const trialsCount = 2;
     const { summary, rawResults, resultsFilePath } = await BenchmarkRunner.executeBenchmark({
       workspaceRoot: testWorkspace,
