@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { safeSegment } from "./agy-capture.js";
@@ -53,6 +61,85 @@ export function omaHomeDir(homeDirectory?: string): string {
 
 export function workspaceRegistryDir(homeDirectory?: string): string {
   return join(omaHomeDir(homeDirectory), "workspaces");
+}
+
+/**
+ * Durable trace of every attempt to bind a workspace.
+ *
+ * Whether the host answers `roots/list` decides which project a session governs, and there is no
+ * way to ask after the fact: the session is over. One append-only line per broker start records
+ * the outcome, so the next `doctor` can say what actually happened instead of leaving it to
+ * whoever was watching the terminal.
+ */
+export function bindAttemptsPath(homeDirectory?: string): string {
+  return join(omaHomeDir(homeDirectory), "bind-attempts.jsonl");
+}
+
+export type BindOutcome = "roots/list" | "explicit" | "unresolved" | "refused-install-tree";
+
+export interface BindAttempt {
+  at: string;
+  /** What the broker believed it governed, when it got that far. */
+  root: string | null;
+  outcome: BindOutcome;
+  cwd: string;
+  detail?: string;
+}
+
+export function recordBindAttempt(
+  attempt: Omit<BindAttempt, "at"> & { at?: string; homeDirectory?: string },
+): void {
+  const record: BindAttempt = {
+    at: attempt.at ?? new Date().toISOString(),
+    root: attempt.root,
+    outcome: attempt.outcome,
+    cwd: attempt.cwd,
+    ...(attempt.detail !== undefined ? { detail: attempt.detail } : {}),
+  };
+  try {
+    mkdirSync(omaHomeDir(attempt.homeDirectory), { recursive: true });
+    appendFileSync(
+      bindAttemptsPath(attempt.homeDirectory),
+      `${JSON.stringify(record)}\n`,
+      "utf8",
+    );
+  } catch {
+    // A missing trace costs diagnosis, never correctness.
+  }
+}
+
+/** The most recent bind attempts, newest first. */
+export function readBindAttempts(
+  options: { homeDirectory?: string; limit?: number } = {},
+): BindAttempt[] {
+  const path = bindAttemptsPath(options.homeDirectory);
+  if (!existsSync(path)) return [];
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  const attempts: BindAttempt[] = [];
+  for (const line of raw.split(/\r?\n/u)) {
+    if (line.trim().length === 0) continue;
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (!isRecord(parsed)) continue;
+      if (typeof parsed.outcome !== "string" || typeof parsed.cwd !== "string") continue;
+      attempts.push({
+        at: typeof parsed.at === "string" ? parsed.at : new Date(0).toISOString(),
+        root: typeof parsed.root === "string" ? parsed.root : null,
+        outcome: parsed.outcome as BindOutcome,
+        cwd: parsed.cwd,
+        ...(typeof parsed.detail === "string" ? { detail: parsed.detail } : {}),
+      });
+    } catch {
+      continue;
+    }
+  }
+  const limit = options.limit ?? 20;
+  return attempts.slice(-limit).reverse();
 }
 
 /**

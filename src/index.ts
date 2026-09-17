@@ -1,9 +1,13 @@
 import { runGraphCli } from "./graph/cli.js";
 import { runOmaCli } from "./cli/oma-cli.js";
+import { runProbeCli } from "./probe/cli.js";
 
 export async function init(args = process.argv.slice(2)): Promise<number> {
   if (args[0] === "graph") {
     return runGraphCli(args.slice(1));
+  }
+  if (args[0] === "probe") {
+    return runProbeCli(args.slice(1));
   }
   if (args[0] === "mcp" && args[1] === "serve") {
     await import("./mcp/broker-server.js");

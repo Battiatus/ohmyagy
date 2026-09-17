@@ -503,7 +503,7 @@ function deployCoreSkills(stagingDir: string): void {
   }
 }
 
-function antigravityCommand(parts: string[]): string {
+export function antigravityCommand(parts: string[]): string {
   return parts
     .map((part) => {
       const normalized = part.replaceAll("\\", "/");

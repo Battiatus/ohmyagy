@@ -227,7 +227,12 @@ export class AgyDriver implements IAgyDriver {
 
     // Extraction & parsing du JSON structuré
     let { parsed, parseError } = this.extractStructuredOutput(rawStdout);
-    parsed = unwrapAgyResponse(parsed);
+    if (isEmptyAgySuccessEnvelope(parsed)) {
+      parsed = undefined;
+      parseError = "AGY returned a successful envelope with an empty response";
+    } else {
+      parsed = unwrapAgyResponse(parsed);
+    }
 
     // Classification du statut d'exécution
     let status: DriverStatus;
@@ -311,6 +316,10 @@ export class AgyDriver implements IAgyDriver {
       options.worktreeDir,
     ];
 
+    // AGY otherwise attaches print-mode calls made from a temporary worktree to the
+    // persistent `default-cli-project`. A run then inherits unrelated conversation state and
+    // skills. OMA executes every graph node as an isolated, bounded turn, so it must receive
+    // an isolated AGY project as well.
     if (options.modelOverride) {
       args.splice(2, 0, "--model", cap.modelSlug);
     }
@@ -359,6 +368,11 @@ export class AgyDriver implements IAgyDriver {
     if (options.jsonSchemaPath) {
       args.push("--json-schema", options.jsonSchemaPath);
     }
+
+    // Isolate every run in its own AGY project. Without it, a print-mode call made from a
+    // temporary worktree is attached to the persistent `default-cli-project` and inherits
+    // unrelated conversation state and skills across missions.
+    args.push("--new-project");
 
     if (options.extraArgs && options.extraArgs.length > 0) {
       args.push(...options.extraArgs);
@@ -455,6 +469,26 @@ export function unwrapAgyResponse(parsed: unknown): unknown {
   } catch {
     return parsed;
   }
+}
+
+/**
+ * True when AGY reported a successful turn but its `response` field is empty.
+ *
+ * Measured on AGY 1.2.5 (2026-09-17): a print-mode run that hit the 3-minute
+ * `--print-timeout` while a tool turn was still in progress exited 0 and emitted
+ * `{"status":"SUCCESS","response":"","num_turns":1,...}`. The envelope is a success
+ * shell around no answer at all, so treating it as a real result let a node be marked
+ * `succeeded` with nothing produced. It is a failure: the driver must surface it as one
+ * so the graph does not integrate an empty diff or attribute a verdict to no work.
+ */
+export function isEmptyAgySuccessEnvelope(parsed: unknown): boolean {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+  const record = parsed as Record<string, unknown>;
+  const status = typeof record.status === "string" ? record.status.toUpperCase() : undefined;
+  if (status !== "SUCCESS") return false;
+  if (!("response" in record)) return false;
+  const response = record.response;
+  return typeof response === "string" && response.trim().length === 0;
 }
 
 function isRealAgyBinary(candidate: string): boolean {

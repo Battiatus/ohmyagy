@@ -55,6 +55,12 @@ test.skipIf(!REAL_AGY_ENABLED)(
       // Install the plugin so the MCP broker config exists exactly as AGY sees it.
       installWorkspacePlugin(root, { gates: [passGate] });
 
+      // installWorkspacePlugin writes a root .gitignore (adds `.oma/`). Commit it so the
+      // mission's clean-workspace guard sees a clean tree — the guard excludes OMA's own
+      // dirs but not a freshly written .gitignore, and a dirty tree is a legitimate refusal.
+      git(root, ["add", "-A"]);
+      git(root, ["commit", "-m", "install oma plugin", "--allow-empty"]);
+
       // 2. Run a genuine multi-agent mission against the real agy binary.
       const report = await RealMissionExecutor.execute({
         workspaceRoot: root,
@@ -156,7 +162,11 @@ function runMcp(root: string, messages: unknown[]): unknown[] {
   const input = `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`;
   const result = spawnSync(String(server.command), server.args.map(String), {
     cwd: typeof server.cwd === "string" ? server.cwd : root,
-    env: { ...process.env, ...env },
+    // A read-only palette query must not kick off the memory drain: with a populated
+    // staging journal the broker's autoDrain fires a live Flash (agy) call that keeps the
+    // stdio server alive well past this probe's timeout. Draining is fire-and-forget in
+    // production; here we only want to read the mission back.
+    env: { ...process.env, ...env, OMA_AUTO_DRAIN: "off" },
     input,
     encoding: "utf8",
     windowsHide: true,

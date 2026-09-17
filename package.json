@@ -22,7 +22,12 @@
     "test:ledger": "npm run build && node --test dist/src/ledger/__tests__/journal-store.test.js",
     "test:plugin": "npm run build && node --test dist/src/mcp/__tests__/broker-server.test.js",
     "test:staged-review": "npm run build && node --test --test-concurrency=1 dist/src/orchestration/__tests__/staged-review.test.js",
-    "test:live": "npm run build && node --test dist/src/live/__tests__/live-audit.test.js"
+    "test:live": "npm run build && node --test dist/src/live/__tests__/live-audit.test.js",
+    "probe:install": "npm run build && node dist/bin/oma.js probe install",
+    "probe:status": "node dist/bin/oma.js probe status",
+    "probe:reset": "node dist/bin/oma.js probe reset",
+    "probe:report": "node dist/bin/oma.js probe report",
+    "probe:uninstall": "node dist/bin/oma.js probe uninstall"
   },
   "author": "",
   "license": "ISC",

@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { test } from "bun:test";
 import {
   bindConversation,
+  readBindAttempts,
   readConversationBinding,
   readRegisteredWorkspaces,
+  recordBindAttempt,
   registerWorkspace,
   sameWorkspacePath,
 } from "../workspace-registry.js";
@@ -106,6 +108,45 @@ test("an unreadable registry or binding degrades to no evidence", () => {
   try {
     assert.deepEqual(readRegisteredWorkspaces(home), []);
     assert.equal(readConversationBinding("conv-missing", home), undefined);
+  } finally {
+    safeRemove(home);
+  }
+});
+
+test("bind attempts are recorded durably, newest first", () => {
+  const home = makeHome();
+  try {
+    assert.deepEqual(readBindAttempts({ homeDirectory: home }), []);
+
+    recordBindAttempt({
+      root: "C:/project",
+      outcome: "roots/list",
+      cwd: "C:/editor",
+      homeDirectory: home,
+      at: "2026-09-14T10:00:00.000Z",
+    });
+    recordBindAttempt({
+      root: null,
+      outcome: "unresolved",
+      cwd: "C:/editor",
+      detail: "roots/list returned no root",
+      homeDirectory: home,
+      at: "2026-09-14T10:01:00.000Z",
+    });
+    recordBindAttempt({
+      root: "C:/editor",
+      outcome: "refused-install-tree",
+      cwd: "C:/editor",
+      homeDirectory: home,
+      at: "2026-09-14T10:02:00.000Z",
+    });
+
+    const attempts = readBindAttempts({ homeDirectory: home });
+    assert.equal(attempts.length, 3);
+    assert.equal(attempts[0].outcome, "refused-install-tree", "newest first");
+    assert.equal(attempts[2].outcome, "roots/list");
+    assert.equal(attempts[1].detail, "roots/list returned no root");
+    assert.equal(readBindAttempts({ homeDirectory: home, limit: 2 }).length, 2);
   } finally {
     safeRemove(home);
   }

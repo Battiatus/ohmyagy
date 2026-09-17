@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "bun:test";
 import { openDatabase } from "../../brain/sqlite-adapter.js";
 import { appendStagedRecord } from "../../brain/agy-capture.js";
-import { bindConversation, readRegisteredWorkspaces } from "../../brain/workspace-registry.js";
+import { bindConversation, readBindAttempts, readRegisteredWorkspaces } from "../../brain/workspace-registry.js";
 import { BrainStore } from "../../brain/brain-store.js";
 import { drainStagedCapture } from "../../brain/staging-drain.js";
 
@@ -255,6 +255,13 @@ test("the host's roots decide the project, not the directory the editor used as 
     assert.equal(registry.length, 1, `registry: ${JSON.stringify(registry)}`);
     assert.equal(registry[0].root, project);
     assert.equal(registry[0].source, "roots/list");
+
+    // The run leaves a durable trace of how the workspace was decided. Without it, the one
+    // question that matters — does this host answer roots/list? — is unanswerable after the fact.
+    const attempts = readBindAttempts({ homeDirectory: home });
+    assert.equal(attempts.length, 1, JSON.stringify(attempts));
+    assert.equal(attempts[0].outcome, "roots/list");
+    assert.equal(attempts[0].root, project);
   } finally {
     broker.close();
     cleanup(project, editorInstall, home);
@@ -277,6 +284,13 @@ test("an editor-install workspace with no host roots is refused, not silently us
     // A broker that only guessed its cwd has no project to publish. Registering the
     // install tree would put it into the set attribution is decided against.
     assert.deepEqual(readRegisteredWorkspaces(home), []);
+
+    // And the host's silence is recorded, because that is what decides whether this deployment
+    // is governing real projects at all.
+    const attempts = readBindAttempts({ homeDirectory: home });
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].outcome, "unresolved");
+    assert.match(String(attempts[0].detail), /roots\/list returned no root/u);
 
     // The escape hatch stays open: the cause must stay diagnosable.
     const doctor = await broker.request(3, "tools/call", { name: "doctor", arguments: {} });

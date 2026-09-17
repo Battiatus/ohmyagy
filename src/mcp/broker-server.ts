@@ -30,7 +30,7 @@ import {
   summarizeMission,
 } from "../mission/read-model.js";
 import { OmaDoctor, describeWorkspace, type WorkspaceReport } from "../runtime/doctor.js";
-import { registerWorkspace } from "../brain/workspace-registry.js";
+import { registerWorkspace, recordBindAttempt } from "../brain/workspace-registry.js";
 import { recordInterview } from "../mission/interview-gate.js";
 import {
   DISPATCH_TOOL_DEFINITIONS,
@@ -228,12 +228,25 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
   // A broker given an explicit project publishes it immediately; a broker that only
   // guessed its cwd has no project to publish. Registration is what capture
   // attribution is decided against, so publishing a guess would defeat the point.
-  if (
-    config.workspaceRootIsExplicit &&
-    !describeWorkspace(config.workspaceRoot, config.workspaceRootSource).governsEditorInstall
-  ) {
-    registerWorkspace({ workspaceRoot: config.workspaceRoot, source: "OMA_WORKSPACE_ROOT" });
-    scheduleAutoDrain();
+  if (config.workspaceRootIsExplicit) {
+    if (describeWorkspace(config.workspaceRoot, config.workspaceRootSource).governsEditorInstall) {
+      // Recorded because this is the silent-wrong-project case, and the only trace of it used to
+      // be a line on a terminal nobody was reading.
+      recordBindAttempt({
+        root: config.workspaceRoot,
+        outcome: "refused-install-tree",
+        cwd: process.cwd(),
+        detail: "OMA_WORKSPACE_ROOT names the editor installation directory",
+      });
+    } else {
+      registerWorkspace({ workspaceRoot: config.workspaceRoot, source: "OMA_WORKSPACE_ROOT" });
+      recordBindAttempt({
+        root: config.workspaceRoot,
+        outcome: "explicit",
+        cwd: process.cwd(),
+      });
+      scheduleAutoDrain();
+    }
   }
   const pendingReplies = new Map<string | number, (message: JsonRpcMessage) => void>();
   let rootsRequestSeq = 0;
@@ -284,6 +297,12 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
       process.stderr.write(
         "OMA: the host advertised roots but returned none; the workspace stays unresolved.\n",
       );
+      recordBindAttempt({
+        root: null,
+        outcome: "unresolved",
+        cwd: process.cwd(),
+        detail: roots === undefined ? "roots/list did not answer in time" : "roots/list returned no root",
+      });
       return;
     }
     const usable = roots.filter((root) => !describeWorkspace(root).governsEditorInstall);
@@ -291,6 +310,12 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
       process.stderr.write(
         `OMA: the host returned ${roots.length} usable root(s) (${roots.join(", ")}); refusing to guess which project this session governs.\n`,
       );
+      recordBindAttempt({
+        root: null,
+        outcome: "unresolved",
+        cwd: process.cwd(),
+        detail: `${usable.length} usable root(s): ${usable.join(", ")}`,
+      });
       return;
     }
     config.workspaceRoot = usable[0];
@@ -299,6 +324,7 @@ export function startMcpBrokerServer(config: BrokerConfig): void {
     // workspaces that really did bind, which is what stops one project's records from
     // being poured into another.
     registerWorkspace({ workspaceRoot: usable[0], source: "roots/list" });
+    recordBindAttempt({ root: usable[0], outcome: "roots/list", cwd: process.cwd() });
     scheduleAutoDrain();
   };
 

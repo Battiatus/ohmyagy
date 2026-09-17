@@ -35,6 +35,7 @@ describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
       "60s",
       "--json-schema",
       "schemas/task-result.json",
+      "--new-project",
       "--custom-flag",
       "value",
     ]);
@@ -51,7 +52,13 @@ describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
     });
 
     assert.equal(args.includes("--agent"), false);
-    assert.deepEqual(args.slice(0, 4), ["-p", "Implement the same task without OMA assistance", "--output-format", "json"]);
+    assert.equal(args.includes("--new-project"), true);
+    assert.deepEqual(args.slice(0, 4), [
+      "-p",
+      "Implement the same task without OMA assistance",
+      "--output-format",
+      "json",
+    ]);
   });
 
   it("auto-approves and sandboxes write-mode runs so non-interactive edits do not hang", () => {
@@ -195,6 +202,36 @@ describe("WP-3 AgyDriver Unit & Integration Test Suite", () => {
     assert.equal(result.exitCode, 0);
     assert.equal(result.parsedOutput, undefined);
     assert.match(result.error ?? "", /failed to provide valid JSON output/i);
+  });
+
+  it("rejects an AGY success envelope whose model response is empty", async () => {
+    const mockProcessRunner = {
+      execute: async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          conversation_id: "agy-conversation",
+          status: "SUCCESS",
+          response: "",
+        }),
+        stderr: "",
+        durationMs: 100,
+        timedOut: false,
+        killed: false,
+      }),
+    };
+
+    const driver = new AgyDriver({ processRunner: mockProcessRunner as any });
+    const result = await driver.invoke({
+      contractPrompt: "Return one structured answer",
+      persona: "worker",
+      worktreeDir: "C:\\worktree",
+      timeoutMs: 5_000,
+    });
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.parsedOutput, undefined);
+    assert.match(result.error ?? "", /empty response/i);
   });
 
   it("maps exit codes 124 and 143 to status timed_out", async () => {

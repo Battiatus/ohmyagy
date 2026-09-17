@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgyDriver } from "./agy-driver.js";
+import { readBindAttempts, type BindAttempt } from "../brain/workspace-registry.js";
 import { HOOK_EVENT_EVIDENCE, validateHooksFile } from "../packaging/hook-contract.js";
 
 export interface DoctorReport {
@@ -50,6 +51,13 @@ export interface DoctorReport {
    * attests to a workspace no user asked about.
    */
   workspace: WorkspaceReport;
+  /**
+   * The most recent attempts to bind a workspace, newest first.
+   *
+   * A session that governed the wrong project left no evidence once it ended, which made the one
+   * question that matters — does this host answer `roots/list`? — unanswerable after the fact.
+   */
+  bindHistory: BindAttempt[];
   /**
    * Layered attestation: installed != loaded != tested.
    * `pluginDiscovery.valid` above is a static file-existence check and stays for
@@ -231,7 +239,7 @@ export class OmaDoctor {
         });
         if (helpProc.status === 0) {
           const helpOut = `${helpProc.stdout ?? ""}\n${helpProc.stderr ?? ""}`;
-          const flags = ["--agent", "-p", "--output-format", "--effort", "--add-dir", "--print-timeout", "--model", "--mode"];
+          const flags = ["--agent", "-p", "--output-format", "--effort", "--add-dir", "--print-timeout", "--model", "--mode", "--new-project"];
           agyInfo.supportedFlags = flags.filter((flag) => helpOut.includes(flag));
           const missingFlags = flags.filter((flag) => !agyInfo.supportedFlags.includes(flag));
           if (missingFlags.length > 0) {
@@ -349,6 +357,9 @@ export class OmaDoctor {
         diagnostics,
       },
       workspace: describeWorkspace(workspaceRoot, workspaceSource),
+      // Whether the host answers `roots/list` decides which project a session governs, and the
+      // session is gone by the time anyone asks. These are the last few recorded attempts.
+      bindHistory: readBindAttempts({ limit: 5 }),
       attestation: buildAttestationReport(workspaceRoot),
     };
   }
